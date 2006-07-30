@@ -2,7 +2,7 @@
 
 # used by mrsync.py to find the executables multicaster, multicatcher, trFilelist
 # hopefully, all machines put them in the same place as on the master machine.
-binDir                = '/dir_path/7281/src/linux';  # bin
+binDir                = '/dir_path/7281/src/linux1';  # bin
 rBinDir               = binDir;  # for remote target machines.
 
 # This is a general bookkeeping file for mrsync.py.

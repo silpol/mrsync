@@ -17,6 +17,10 @@
 	        version 3.1.0
 		  -- codes for IPv6 are ready (but not tested)
 		     IPv4 is tested ok.
+                version 3.2.0
+                  -- monitor change improvement
+                  -- handshake improvement (e.g. seq #)
+		  -- if one machine skips a file, all will NOT close()
 
    Copyright (C)  2005 Renaissance Technologies Corp.
    Copyright (C)  2001 Renaissance Technologies Corp.
@@ -53,12 +57,17 @@
 extern int    verbose;
 extern char * machine_list_file;   /* defined in complaints.c */
 extern char * bad_machines;        /* array of size nMachines, defined in complaints.c */
-extern int  * total_missing_page; 
+extern char * file_received;
+extern int  * missing_pages; 
 extern int    backup;
 extern int    nPattern;
 extern char * pattern_baseDir;
 extern int    nTargets;
 extern int    my_ACK_WAIT_TIMES;
+extern int    toRmFirst;
+extern int    quitWithOneBad;
+extern int    skip_count;
+extern int    file_changed;
 
 char * my_MCAST_ADDR = MCAST_ADDR;
 int  my_FLOW_PORT    = FLOW_PORT;
@@ -67,7 +76,6 @@ int  my_TTL          = MCAST_TTL;
 int  my_LOOP         = MCAST_LOOP;
 char * my_IFname     = MCAST_IF;
 
-int           without_monitor = FALSE;
 int           monitorID = -1;
 
 int           no_feedback_count;
@@ -79,6 +87,8 @@ void usage()
 	  "   Option list:\n"
 	  "   [ -v <verbose_level 0-2> ]\n"
 	  "   [ -w <ack_wait_times default= %d (secs) ]\n"
+	  "   [ -X toRmFirst_flag default= cp2tmp_and_mv ]\n"
+	  "   [ -q quit_with_1_bad defalut= quit_with_all_bad ]\n"
           "   -------- essential options ----------------------------------\n"
 	  "     -m <machine_list_filePath>\n" 
 	  "     -s <data_source_path>\n"
@@ -87,7 +97,6 @@ void usage()
 	  "   [ -b flag to turn on backup ]\n"
 	  "   [ -r <filepath> for regex patterns for files needing backup ]\n"
 	  "   [ -d <basedir> for regex patterns ]\n"
-	  "   [ -x flag to turn off feedback monitoring ]\n"
 	  "   -------- mcast options --------------------------------------\n"
 	  "   [ -A <my_mcast_address default=%s> **same as for multicatcher ]\n"
 	  "   [ -P <my_PORT default=%d> **same as for multicatcher ]\n"          
@@ -97,30 +106,42 @@ void usage()
 	  VERSION, my_ACK_WAIT_TIMES, MCAST_ADDR, PORT, my_TTL);
 }
 
+
 int monitor_cmd(int cmd, int machineID)
 {
+  /* 
+     Once this fx is called the old monitor will be 
+     turned off. So, we need to make sure this fx
+     returns TRUE for a machine. Or the monitor_set_up
+     should fail. 
+  */
   int count =0;
   set_delay(0, FAST);
   send_cmd(cmd, machineID); 
   while (1) { /* wait for ack */
-    if (read_handle_complaint()==0) {
+    if (read_handle_complaint(cmd)==0) {
       ++count;
       send_cmd(cmd, machineID); 
-      if (count > 100) return FALSE;  /* wait time ~ 100 * FAST */
-    } else 
+      if (count > SET_MON_WAIT_TIMES) {
+	return FALSE;
+      }
+    } else {
       return TRUE;
+    }
   }
 }
 
 int find_max_missing_machine(char *flags)
 {
+  /* flags[] -> which machines are not considered */
   int i, index = -1;
   int max = -1;
   int threshold;
 
   for(i=0; i<nTargets; ++i) {
     int missing;
-    missing = total_missing_page[i];
+    /** missing = total_missing_page[i];    **/
+    missing = missing_pages[i];  /* for last file (OPEN) or this file (other cmds)*/
     if (missing > max && flags[i] == GOOD_MACHINE) {
       max = missing;
       index = i;
@@ -129,54 +150,113 @@ int find_max_missing_machine(char *flags)
 
   threshold = (get_nPages() > SWITCH_THRESHOLD*100) ?
     get_nPages() / 100 : SWITCH_THRESHOLD;
+  if (index>=0) {
+    if (monitorID>=0) {
+      if (flags[monitorID]==BAD_MACHINE) return index;
+      /** if (max <= (total_missing_page[monitorID] + threshold)) **/
+      if (max <= (missing_pages[monitorID] + threshold))
+	return monitorID;
+    }
+    return index;
+  } else { /* could come here if all are busy*/
+    return -1;
+  }
 
+  /**
   return ((index >= 0) && 
 	  (monitorID >= 0) &&
 	  (bad_machines[monitorID] == GOOD_MACHINE) &&
 	  (max <= (total_missing_page[monitorID] + threshold))) ?
     monitorID : index;
+  **/
+}
+
+void set_monitor(int mid)
+{
+  /* one machine is to be set. So need to succeed. */
+  if (monitor_cmd(SELECT_MONITOR_CMD, mid)) {
+    if (verbose >=1) fprintf(stderr, "Monitor - %s\n", id2name(mid));
+    return;
+  } else {
+    fprintf(stderr, "Fatal: monitor %s cannot be set up!\n", id2name(mid));
+    send_done_and_pr_msgs(-1.0);  
+    exit(BAD_EXIT);
+  }
 }
 
 void check_change_monitor(int undesired_index)
 {
   /* this function changes the value of the global var: monitorID */
-  int i, count = 0;
+  int i, count;
   char * flags;
+ 
+  /* if all targets received the file, no need to go on */
+  if ((count=nNotRecv())==0) return;
 
-  if (without_monitor) {
-    if (verbose >=1) printf("No monitor is selected. i.e. no congestion control.\n");
-    return; 
-    /* in this case, no target machine
-       is selected as the monitor (isMonitor=false for all).
-       So, the feedback mechanism is effectively turned off*/
+  if (count==1) {
+    i = iNotRecv();        
+    if (bad_machines[i] == GOOD_MACHINE) {
+      monitorID = i;
+      /* 
+	 'i' could be the current monitor.
+	 We'd like to set it because there might
+	 be something wrong with it if we come to 
+	 to this point.
+      */
+      set_monitor(monitorID);
+    }    
+    return;
   }
 
+  /* more than two machines do not receive the file yet */
+  /* flags mark those machines as BAD which we don't want to consider */
   flags = malloc(nTargets * sizeof(char));
   for(i=0; i<nTargets; ++i) {
-    flags[i] = (i==undesired_index) ? BAD_MACHINE :bad_machines[i]; 
+    flags[i] = (i == undesired_index || file_received[i] == FILE_RECV) ? 
+      BAD_MACHINE : bad_machines[i]; 
   }
 
+  /* check if all machines are not to be considered */
+  count = 0;
+  for(i=0; i<nTargets; ++i) {
+    if (flags[i]==BAD_MACHINE) ++count;
+  }
+  if (count==nTargets) {
+    /* Two ways to get here are
+       (1) during do_one_page:
+           prev_monitor = (not_recv) and other not_recv's are bad_machines.           
+       (2) during after-ack:
+           prev_monitor = (recv) and other not_recv's are bad_machines.
+    */
+    free(flags);
+    set_monitor(monitorID);
+    return; 
+  }
+
+  /* at least one not_recv (and good) machine is to be considered */
+  count = 0;
   while (count < nTargets) {
     i = find_max_missing_machine(flags);
-    if (i==monitorID) break;
+    /* if (i==monitorID) break;*/
     monitorID = i;
 
     if (monitorID < 0) break;
 
     if (monitor_cmd(SELECT_MONITOR_CMD, monitorID)) {
-      if (verbose >=1) printf("Monitor = %s\n", id2name(monitorID));
+      if (verbose >=1) fprintf(stderr, "Monitor = %s\n", id2name(monitorID));
       break;
     } else {
       flags[monitorID] = BAD_MACHINE;
+      /* Then, we attemp to set up other machine */
     }
     ++count;
   }
 
   free(flags);
   if (monitorID < 0) {
-    fprintf(stderr, "monitor machine cannot be set up!\n");
-    do_cntl_c(0);
-    my_exit(BAD_EXIT);
+    fprintf(stderr, "Fatal: monitor machine cannot be set up!\n");
+    send_done_and_pr_msgs(-1.0);  
+    exit(BAD_EXIT);
   }
 }
 
@@ -185,29 +265,31 @@ void do_one_page(int page)
   unsigned long rtt;
   refresh_timer();
   start_timer();
-  send_page(page);
+  if (!send_page(page)) return;
+
   /* read_handle_complaint() waits n*interpage_interval at most */
-  if (read_handle_complaint()==0) {  /* delay_sec for readable() is set by set_delay() */
+  if (read_handle_complaint(SENDING_DATA)==0) {  
+    /* delay_sec for readable() is set by set_delay() */
     /* 
        at this point, the readable() returns without getting a reply 
        from monitorID after FACTOR*DT_PERPAGE (or DT_PERPAGE if without_monitor)
     */
-    if (without_monitor) return;
 
     ++no_feedback_count;
     if (verbose>=2) printf("no reply, count = %d\n", no_feedback_count);
-    update_rtt_hist(999999);  /* register this as rtt = infinite --- the last element in rtt_hist */
-    if (no_feedback_count>NO_FEEDBACK_COUNT_MAX) { /* count the consecutive no_feedback event */
+    update_rtt_hist(999999);  
+    /* register this page as rtt = infinite --- the last element in rtt_hist */
+
+    if (no_feedback_count > NO_FEEDBACK_COUNT_MAX) { 
       /* switch to another client */
-      if (verbose >=2) 
-	fprintf(stderr, "Consecutive non_feedback exceeds limit, Changing monitor machine.\n");
-      if (nTargets>1) check_change_monitor(monitorID); /* replace the current monitor */
+      if (verbose >=2)
+	fprintf(stderr, 
+		"Consecutive non_feedback exceeds limit, Changing monitor machine.\n");
+      /* if (nTargets>1 && (nTargets - nBadMachines()) > 1 && nNotRecv() > 1) */
+      check_change_monitor(monitorID); /* replace the current monitor */
       no_feedback_count = 0;
-      /* for nTargets = 1,
-	 there is a danger of hanging in this loop...
-	 add more checking later
-      */
     }
+    return;
   } else {
     end_timer();
     update_time_accumulator();
@@ -226,13 +308,25 @@ void send_cmd_and_wait_ack(int cmd_code)
   send_cmd(cmd_code, (int) ALL_MACHINES);
   refresh_machine_status();
   /*set_delay(0, FAST);*/
-  set_delay(0, DT_PERPAGE* ((without_monitor)? 1 : FACTOR));
+  set_delay(0, DT_PERPAGE*FACTOR);
+  if (cmd_code==EOF_CMD) mod_machine_status(); 
   wait_for_ok(cmd_code);
   do_badMachines_exit();
-  check_change_monitor(-1);
+  /* check_change_monitor(-1); */
 }
 
-
+int do_file_changed_skip()
+{
+  /* if file is changed during syncing, then we should skip this file */
+  if (file_changed || !same_stat_for_file()) {
+    fprintf(stderr, "WARNING: file is changed during sycing -- skipping\n");
+    send_cmd_and_wait_ack(CLOSE_ABORT_CMD);
+    free_missing_page_flag();
+    ++skip_count;
+    return TRUE;
+  }
+  return FALSE;
+}
 
 int main(int argc, char *argv[])
 {
@@ -245,7 +339,7 @@ int main(int argc, char *argv[])
   time_t tloc;
   time_t time0, time1; 
 
-  while ((c = getopt(argc, argv, "v:w:A:P:T:LI:m:s:f:xbr:d:")) !=  EOF) {
+  while ((c = getopt(argc, argv, "v:w:A:P:T:LI:m:s:f:br:d:Xq")) !=  EOF) {
     switch (c) {
     case 'v': 
       verbose = atoi(optarg);
@@ -292,9 +386,11 @@ int main(int argc, char *argv[])
       if (pattern_baseDir[strlen(pattern_baseDir)-1]=='/') 
 	pattern_baseDir[strlen(pattern_baseDir)-1] = '\0' ; /* remove last / */
       break;
-    case 'x':
-      /* flag to indicate if we want to use the congestion control */
-      without_monitor = TRUE;
+    case 'X':
+      toRmFirst = TRUE;
+      break;
+    case 'q':
+      quitWithOneBad = TRUE;
       break;
     case '?':
       usage();
@@ -313,14 +409,22 @@ int main(int argc, char *argv[])
     if (!pattern_baseDir) pattern_baseDir = strdup(source_path);
     if (strlen(source_path) < strlen(pattern_baseDir) ||
 	strncmp(source_path, pattern_baseDir, strlen(pattern_baseDir))!=0) {
-      fprintf(stderr, "src_path (%s) should include (and be longer than) pattern_baseDir (%s)",
+      fprintf(stderr, 
+	      "src_path (%s) should include (and be longer than) pattern_baseDir (%s)",
 	      source_path, pattern_baseDir);
-      bad_args = TRUE; /* cannot do my_exit() here, since init_send() is not run */
+      bad_args = TRUE; /* cannot do my_exit() here, since init_send() has not run */
     }
   }
 
-  get_machine_names(machine_list_file);
-  if (!init_synclist(synclist_path, source_path)) bad_args = TRUE;
+  if (backup && toRmFirst) {
+    fprintf(stderr, "-B and -X cannot co-exist\n");
+    bad_args = TRUE;
+  }
+
+  if (machine_list_file) { 
+    get_machine_names(machine_list_file);
+    if (!init_synclist(synclist_path, source_path)) bad_args = TRUE;
+  }
 
   if (verbose >= 2)
     fprintf(stderr, "Total number of files: %d\n", total_entries());
@@ -385,44 +489,68 @@ int main(int argc, char *argv[])
     if (ctotal_pages <= 0) continue;  
 
     /* for other regular files */    
-    set_delay(0, DT_PERPAGE* ((without_monitor)? 1 : FACTOR));
     init_missing_page_flag(ctotal_pages);
+    refresh_missing_pages(); /* total missing pages for this file for each tar */
         
     /* ----- sending file data ----- first round */
-    no_feedback_count = 0;
+    no_feedback_count = 0;    
     for (cpage = 1; cpage <= ctotal_pages; cpage++) {
       /* 
-	 the mode field may be changed by change_monitor() 
-	 so, we have to set the mode field for every page
+	 the mode field and delay may be changed by change_monitor
       */
+      set_delay(0, DT_PERPAGE*FACTOR);
       set_mode(SENDING_DATA);  
       do_one_page(cpage);
     }
 
-    /* EOF */
+    if (do_file_changed_skip()) continue;
+
+    /* send "I am done with the first round" */
     reset_has_missing();
+    refresh_file_received(); /* to record machines that have received this file */
     send_cmd_and_wait_ack(EOF_CMD);
+    
+    /* after the first run, before we go to 2nd and 3rd run, */
+    if (has_missing_pages()) check_change_monitor(-1);  
 
     /* ----- sending file data again, 2nd and 3rd and ...n-th round */
+    reset_has_sick();
     while (has_missing_pages()) {
-      set_delay(0, DT_PERPAGE*((without_monitor)? 1 : FACTOR)); 
+      int c; /****************/      
       no_feedback_count = 0;
 
+      c = 0;
       for (cpage = 1; cpage <= ctotal_pages; cpage++){
 	if (is_it_missing(cpage-1)) {
+	  set_delay(0, DT_PERPAGE*FACTOR); 
 	  set_mode(RESENDING_DATA);  
 	  do_one_page(cpage);
 	  page_sent(cpage-1);
+	  ++c; /*************/
 	}
       }
+      fprintf(stderr, "re-sent N_pages = %d\n", c); /*************/
 
       /* eof */
       reset_has_missing();
       send_cmd_and_wait_ack(EOF_CMD);
+      if (has_sick_machines()) {
+	break;
+	/* one machine can reach sick_state while some others are still
+	   in missing_page state.
+	   This break here is ok in terms of skipping this file.*/
+      } else {
+	check_change_monitor(-1);
+      }
     };
 
+    if (do_file_changed_skip()) continue;
+
     /* close file */
-    send_cmd_and_wait_ack(CLOSE_FILE_CMD);
+    send_cmd_and_wait_ack((has_sick_machines()) ? CLOSE_ABORT_CMD : CLOSE_FILE_CMD);
+    if (has_sick_machines()) {
+      fprintf(stderr, "Skip_syncing %s\n", getFilename());
+    }
     free_missing_page_flag();
   } /* end of the for each_file loop */
 

@@ -49,6 +49,7 @@ extern int         verbose;
 extern unsigned int nPages;
 extern unsigned int last_bytes;    /* the number of bytes in the last page of a file */
 extern int cur_entry;
+extern int file_changed;
 extern char* cmd_name[];
 
 /* Where have we last sent from? */
@@ -87,6 +88,8 @@ struct sockaddr_in6 send_addr;
 #endif
 
 /* for final statistics */
+extern unsigned int total_pages;
+extern off_t total_bytes;
 off_t real_total_bytes;  
 unsigned int real_total_pages;
 
@@ -199,15 +202,27 @@ int send_page(int page)
 
   if (verbose>=2) fprintf(stderr, "In send_page()\n");
   
+  if (file_changed) {
+    total_bytes -= ((page<nPages) ? PAGE_SIZE : last_bytes);
+    --total_pages;
+    return FAIL;
+  }
+
   bytes = (unsigned int) pack_page_for_file(page);
 
   if ((page < nPages && bytes != PAGE_SIZE) || 
       (nPages == page && bytes != last_bytes)) {
-    fprintf(stderr, "Critical: read() error, expected_bytes= %d, real= %d, "
+    /* file under sync must have been changed during syncing */
+    fprintf(stderr, "Warning: read() error, expected_bytes= %d, real= %d, "
 	    "page = %d, nPages = %d, for file %s\n",
 	    (page<nPages) ? PAGE_SIZE : last_bytes, 
 	    bytes, page, nPages, getFullname());
-    my_exit(BAD_EXIT);
+    file_changed = TRUE;
+    /* make corrections in total_xxx that we send 
+       otherwise the final statistic will be messed up */
+    total_bytes -= ((page<nPages) ? PAGE_SIZE : last_bytes);
+    --total_pages;
+    return FAIL;
   }
 
   /* fill in the header data */
@@ -285,6 +300,7 @@ void pack_open_file_info()
 
 void send_all_done_cmd()
 {
+  int i;
   *mode_ptr = htonl(ALL_DONE_CMD); /* --> network byte order */
   
   *current_file_ptr = 0;  
@@ -292,7 +308,15 @@ void send_all_done_cmd()
   *total_pages_ptr = 0;
   *bytes_sent_ptr = 0;
   
-  send_buffer(0);
+  for(i=0; i<10; ++i) { /* do it many times, in case network is busy */
+    send_buffer(0); 
+    usleep(DT_PERPAGE*10);
+  }
+  /* NOTE: it is still possible that ALL_DONE msg could not
+           be received by targets.
+           For total robustness, some independent checking on targets
+           should be done.
+  */
   fprintf(stderr, "(ALL DONE)\n");
 }
 

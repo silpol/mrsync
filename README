@@ -26,7 +26,7 @@
          multicaster can now transfer file whose size is larger than 2**31-1.
       -- platform independence (between linux, unix)
          We have tested this independence from a Sun to a Linux machine.
-      -- catching slow machine as the feedback monitor
+      -- catching slow machine as the feedback monitor dynamically
          This significantly reduces the number of occurence of SIT-OUT-RECEIVING-FILE cases.
       -- removing meta-file-info
          Since our basic algorithm is different from that of Aaron's, the meta-file-info
@@ -35,19 +35,31 @@
          If the target machines are NFS data servers, backup feature is absolutely
          necessary. The feature is implemented in the low level multica* codes,
          I will incorporate it into mrsync.py in the next month or so.      
-      -- mcast options
+      -- mcast IP address and port options
          They are now tested and are working.
          This allows multiple multicasting sessions running simultaneously.
       -- code cleanup in both mrsync.py and *.c
       -- code fixing for 64bit arch;
          tested on Debian 64 bit arch by Nicolas Marot in France
+      -- logic flaw which under certain condition
+         caused premature dropout due to 
+         unsuccessful EOF, CLOSE_FILE 
+         and caused unwanranted SIT-OUT case
       -- code provision for IPv6 (but not tested yet)
+version 3.1.1
+      -- minor bug fixes.
+      -- add checking in multicatcher to check if the 
+         system is ready for write.
+      -- codes for IPv6 are ready (but not tested)
+         IPv4 is tested ok.
+version 3.2.0
+      -- monitor change improvement
+      -- handshake improvement (e.g. seq #)
+      -- if one machine skips a file, all will NOT close()
 
 The mrsync package includes the following files:
 --------------------
 README           -- this file (usage example in the end.)
-#README.more      -- a little more detailed description including
-                    the history of mrsync and its main algorithm.
 GPL.License      -- legal stuff
 mrsync.py        -- the driver script that glues everything together
 mrsync_config.py -- system dependent configuration files
@@ -199,13 +211,29 @@ Usage of mrsync.py
     as long as each session uses its own mcast_address and port_number.
     [ No overlap between sessions. ]
 
-(5) By default, mrsync.py prints out only very essential messages.
+(5) mrsync.py -m /dirA/target_list
+              -s /path
+              -X
+    Same functionality as in (2).
+    But (2) is a normal sync. This one invokes the -X.
+    In a normal sync, a given file (let's say /path/foo) is synced
+    with two steps,
+       (a) sync the file to /path/foo.tmp
+       (b) mv /path/foo.tmp /path/foo
+    With -X option, the same file is synced with three steps,
+       (a) rm /path/foo
+       (b) sync the file to /path/foo.tmp
+       (c) mv /path/foo.tmp /path/foo
+    This is useful when the target disk is almost full, and
+    could not afford to have foo.tmp and foo co-existing.
+
+(6) By default, mrsync.py prints out only very essential messages.
     If you want to see more messages (related to some detailed status including
     a rtt_histogram at the end of the session),
     you can spcify '-v 1' in the mrsync.py command line argument list.
     '-v 2' will print out even more detailed messages --- for debugging purpose!
 
-(6) other options of mrsync.py
+(7) other options of mrsync.py
     type 'mrsync.py'  and see them for yourself.
 
 --------------------------------------------------------------------------------

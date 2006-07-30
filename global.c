@@ -25,7 +25,7 @@ char *cmd_name[] = { "TIME-OUT",
 		     "OPEN_FILE", 
 		     "EOF",
 		     "CLOSE_FILE",
-		     "CLOSE_FILE_BK",
+		     "CLOSE_ABORT",
 		     "ALL_DONE",
 		     "SEL_MONITOR",
 		     "NULL"};

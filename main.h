@@ -59,7 +59,7 @@
 #include        <sys/times.h>
 #include        <limits.h>
 
-#define     VERSION        "3.1.1"
+#define     VERSION        "3.2.7"
 
 /* logic values */
 #define     FALSE   0
@@ -76,10 +76,6 @@
 #define     MCAST_TTL      1
 #define     MCAST_LOOP     FALSE
 #define     MCAST_IF       NULL
-
-#define     NO_FEEDBACK_COUNT_MAX 5
-#define     SWITCH_THRESHOLD      50 /* to avoid switching monitor too frequently
-                                        because of small diff in missing_pages */
 
 /* 
    Handling socket's receive buffer on the target machine:
@@ -102,6 +98,18 @@
 #define     ACK_WAIT_PERIOD 1        /* secs (from time()); */
 #define     ACK_WAIT_TIMES  60       /* wait for this many periods */
 
+#define     SICK_RATIO     (0.9)
+#define     SICK_THRESHOLD (50)     /* SICK FOR such many TIMES is really sick */
+
+/* max wait time for write() a page of PAGE_SIZE -- 100 msec */
+#define     WRITE_WAIT_SEC  0
+#define     WRITE_WAIT_USEC 100000
+
+#define     SET_MON_WAIT_TIMES    3000 /* time = this number * FAST */
+#define     NO_FEEDBACK_COUNT_MAX 10
+#define     SWITCH_THRESHOLD      50 /* to avoid switching monitor too frequently
+                                        because of small diff in missing_pages */
+
 /* complaints */
 #define     TOO_FAST       100
 #define     OPEN_OK        200
@@ -120,7 +128,7 @@
 #define     PAGE_BUFFSIZE  (PAGE_SIZE + HEAD_SIZE)
 #define     TOTAL_REC_PAGE 20 /* change to 4 in case hit the OS limit in buf size */
 
-#define     FLOW_BUFFSIZE  (sizeof(int) + sizeof(int) + sizeof(int))
+#define     FLOW_BUFFSIZE  (sizeof(int)*4)
 
 /* 
    Modes and command codes:
@@ -134,7 +142,7 @@
 #define     OPEN_FILE_CMD      4
 #define     EOF_CMD            5
 #define     CLOSE_FILE_CMD     6
-#define     CLOSE_FILE_BK_CMD  7
+#define     CLOSE_ABORT_CMD    7
 #define     ALL_DONE_CMD       8
 #define     SELECT_MONITOR_CMD 9
 #define     NULL_CMD           10
@@ -146,6 +154,9 @@
 
 #define     BAD_MACHINE    '\1'    
 #define     GOOD_MACHINE   '\0'
+
+#define     FILE_RECV      '\1'
+#define     NOT_RECV       '\0'
 
 /* representation of all-targets for sends */
 #define     ALL_MACHINES   -1
@@ -160,13 +171,6 @@
 #define     DATA_READY_STATE 2
 #define     SICK_STATE       3
 
-#define     SICK_RATIO     (0.9)
-#define     SICK_THRESHOLD (10)     /* SICK FOR such many TIMES is really sick */
-
-/* max wait time for write() a page of PAGE_SIZE -- 100 msec */
-#define     WRITE_WAIT_SEC  0
-#define     WRITE_WAIT_USEC 100000
-
 /* 
    The following two are info to be packed into
    meta data to represent either file or directory deletion.
@@ -174,8 +178,8 @@
 /* SPECIAL # of PAGES to signal deleting action */
 #define     TO_DELETE        (-1)
 
-/* temporary file name for transfering to */
-#define     TMP_FILE       "multicast.zzz"
+/* temporary file name prefix for transfering to */
+#define     TMP_FILE       "mrsync."
 
 #include "proto.h"
 

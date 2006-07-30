@@ -25,6 +25,8 @@
 
 #define N 501       /* effectively set the maximum time in rtt_hist to be 500 msec */
 
+extern int verbose;
+
 /* for timing */
 struct timeval tv0, tv1;
 unsigned long  usec_acc, sec_acc;   /* accumulator of timing */
@@ -90,12 +92,18 @@ void update_rtt_hist(unsigned int rtt)
 void pr_rtt_hist()
 {
   int i;
-  printf("rtt histogram\n");
-  printf("msec counts\n");
-  printf("---- --------\n");
+  fprintf(stderr, "rtt histogram\n");
+  fprintf(stderr, "msec counts\n");
+  fprintf(stderr, "---- --------\n");
   for(i=0; i<N; ++i) {
+    if (verbose<=1 && i>10) continue;
     if (rtt_hist[i] != 0) {
-      printf("%4d %u\n", i, rtt_hist[i]);
+      fprintf(stderr, "%4d %u\n", i, rtt_hist[i]);
     }
   }
+}
+
+unsigned int pages_wo_ack()
+{
+  return rtt_hist[N-1];
 }

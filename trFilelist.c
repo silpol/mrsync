@@ -1,4 +1,6 @@
 /*  
+   Copyright (C)  2008 Renaissance Technologies Corp.
+                  main developer: HP Wei <hp@rentec.com>
    Copyright (C)  2006 Renaissance Technologies Corp.
                   main developer: HP Wei <hp@rentec.com>
 
@@ -130,6 +132,30 @@ int find_string(char * str, struct string_list * slp)
   return -1;
 }
 
+/* find if a string in string-list is a sub-string of str */
+int has_sub_string(char * str, struct string_list *slp)
+{
+  int i;
+  int n = slp->endp - slp->str;
+
+  for(i=0; i<n; ++i) {
+    if (strncmp(str, (slp->str)[i], strlen((slp->str)[i]))==0) return i;
+  }
+  return -1;
+}
+
+/* find if the str is a substr of those in slp */
+int has_newdir(char *str, struct string_list *slp)
+{
+  int i;
+  int n = slp->endp - slp->str;
+
+  for(i=0; i<n; ++i) {
+    if (strncmp((slp->str)[i],str, strlen(str))==0) return i;
+  }
+  return -1;
+}
+
 struct uint_list {
   int capacity;
   unsigned int * endp;
@@ -183,17 +209,29 @@ int find_unit(unsigned int data, struct uint_list * uilp)
 struct string_list file_list;
 struct uint_list ino_list;
 struct string_list dir_list;
+struct string_list softlink_list; /* for (a) */
+struct string_list newdir_list;   /* for (b) */
 
 void strip(char * str)
 {
   /* remove trailing \n and spaces */
+  char *pt;
   char *pc = &str[strlen(str)-1];
   while (*pc == ' ' || *pc == '\n') *(pc--) = '\0';
+  /* 20080317 remove leading spaces */
+  pt = pc = &str[0];
+  while (*pc == ' ') ++pc;
+  if (pc != pt) {
+    while (*pc != '\0') *pt++ = *pc++;
+    *pt = '\0';
+  }
 }
 
 void output_subs(char * str)
 {
+  return; /*************************** testing ***************/
   /* to do (2) indicated in the above */
+  /********
   char * pc;
   char subs[PATH_MAX];
   pc = strstr(str, "/");
@@ -208,7 +246,91 @@ void output_subs(char * str)
     }
     pc = strstr(pc+1, "/");
   }
+  ************/
 }
+
+/*** (a)
+     get those softlinks that points to a directory 
+     this is to deal with the following scenario
+     previous structure
+         dir_path  (a directory)
+         db        (a directory)
+
+     newly updated structure on master
+         dir_path -> db
+         db
+
+     rsync --dry-run generates
+        dir_path -> db                      [a link is done on target]
+        deleting dir_path/sub/filename1     [wrong file gets removed ]
+	deleting dir_path/sub/filename2...
+
+     file_operations.c does this when dir_path -> db is due
+        delete dir_path (rm -rf)
+        make the softlink
+     But then the following delete will have undesired deletion.
+
+     ------------------------------------------------------------
+
+     (b)
+     t0     name -> xyz         name -> xyz (target)
+     t1     name/               name -> xyz
+
+     rsync generates
+         name/               update_directory() won't have effect
+         name/f1             delivered to wrong place
+	 name/f2
+	 deleting name       too late
+	 ** the deletion should be done before not after.
+            For now, I will fail this code for this situation.
+     
+***/
+void get_dir_softlinks(char *filename, char * basedir) {
+  FILE * fd;
+  char line[PATH_MAX];
+  struct stat st;
+
+  if ((fd = fopen(filename, "r")) == NULL) {
+    fprintf(stderr, "Cannot open file -- %s \n", filename);
+    exit(-1);
+  }
+
+  while (1) { /* for each line in the file */
+    char *pc;
+    char fn[PATH_MAX];
+
+    if (fgets(line, PATH_MAX, fd)==NULL) break;
+    strip(line);
+    if (strlen(line) == 0) continue; /* skip blank line */
+
+    /* the softlink case is indicated by -> */
+    pc= strstr(line, " -> ");
+    if (pc) { /* it is a softlink */
+      *pc = '\0';
+      /* check if it is a directory */
+      sprintf(fn, "%s/%s", basedir, line);
+
+      /* check if the link-target is a directory */    
+      if (stat(fn, &st)<0) continue; /* We skip this bad entry - no longer exist */
+      
+      if (S_ISDIR(st.st_mode)) {
+	append_string_list(line, &softlink_list);
+      }
+    } else { /* not a softlink --> find if it is a directory */
+      /* find a line without ' ' and with trailing '/' */     
+      pc = strstr(line, " "); /* the first space */
+      if (!pc) {
+	char * plast = &line[0] + strlen(line) - 1;
+	if (*plast == '/') {
+	  append_string_list(line, &newdir_list);
+	}
+      }
+    }
+  }
+
+  fclose(fd);  
+}
+
 
 int main(int argc, char * argv[])
 {
@@ -218,7 +340,7 @@ int main(int argc, char * argv[])
   char line[PATH_MAX];
 
   if (argc < 3) {
-    fprintf(stderr, "Usage: parseRsynclist synclist_filename basedir\n");
+    fprintf(stderr, "Usage: trFilelist synclist_filename basedir\n");
     exit(-1);
   }
 
@@ -228,6 +350,10 @@ int main(int argc, char * argv[])
   init_string_list(&file_list, 10);
   init_uint_list(&ino_list, 10);
   init_string_list(&dir_list, 100);
+  init_string_list(&softlink_list, 10);
+  init_string_list(&newdir_list, 100);
+
+  get_dir_softlinks(filename, basedir);
   
   if ((fd = fopen(filename, "r")) == NULL) {
     fprintf(stderr, "Cannot open file -- %s \n", filename);
@@ -238,20 +364,38 @@ int main(int argc, char * argv[])
     char *pc;
     char fn[PATH_MAX];
     struct stat st;
+    int newdir_flag;
 
     if (fgets(line, PATH_MAX, fd)==NULL) break;
     strip(line);
     if (strlen(line) == 0) continue; /* skip blank line */
+    if (strcmp(line, ".")==0) continue;
+    if (strcmp(line, "./")==0) continue;
 
     /* first we look for deleting entry */
     if (strncmp(line, "deleting ", 9)==0) {
       /* deleting (directory) file_path */
-      char * p1, *p2;
+      char * p1, *p2, *pf;
 
       p1 = strstr(line, " "); /* the first space */
-      p2 = strstr(p1+1, " "); /* deleting directory filepath */ 
-      
-      printf("deleting %s\n", (p2) ? p2+1 : p1+1);
+      p2 = strstr(p1+1, " "); /* deleting directory filepath * 20070912 this is old */ 
+      pf = (p2) ? p2+1 : p1+1;/* it's always p1+1 */
+
+      newdir_flag = has_newdir(pf, &newdir_list);
+
+      if ((has_sub_string(pf, &softlink_list)<0) && newdir_flag<0) { 
+	/* see comments above get_dir_softlinks() */
+	printf("deleting %s\n", pf);
+      } else if (newdir_flag>=0) { /* temporary action */
+	/*** we can simply skip this block later. 20070912 ***/	   
+	/***/
+	fprintf(stderr, "CRITICAL ERROR: An old softlink has been changed to a directory!\n");
+	fprintf(stderr, "                For now, we crash this code for human intervention\n");
+	fprintf(stderr, "                line= %s\n", line);
+	exit(-1);
+	/***/
+      }
+
       continue;
     }
     
@@ -299,5 +443,7 @@ int main(int argc, char * argv[])
     output_subs(line);
     printf("%s\n", line);
   } /* end of one line */
+
+  fclose(fd);
   return 0;
 }

@@ -1,5 +1,5 @@
 /*  
-   Copyright (C)  2006 Renaissance Technologies Corp.
+   Copyright (C)  2006-2008 Renaissance Technologies Corp.
                   main developer: HP Wei <hp@rentec.com>
  
    This program is free software; you can redistribute it and/or modify
@@ -68,7 +68,7 @@ int init_synclist(char * synclist_path, char *bdir)
   if (nEntries == 0) { 
     fclose(fd); 
     fprintf(stderr, "Empty entires in synclist file = %s\n", synclist_path);
-    return FAIL;
+    return SUCCESS; /* OK, nothing to sync */
   } 
   rewind(fd);
 
@@ -133,7 +133,9 @@ void strip(char * str)
 {
   /* remove trailing \n and spaces */
   char *pc = &str[strlen(str)-1];
-  while (*pc == ' ' || *pc == '\n') *(pc--) = '\0';
+  while (*pc == ' ' || *pc == '\n') { 
+    *(pc--) = '\0';
+  }
 }
 
 int same_stat_for_file()
@@ -152,6 +154,30 @@ int same_stat_for_file()
   }
   return SUCCESS;
 
+}
+
+int is_hardlink_line(char * line)
+{
+  /* when line is in the form of 
+     string1 string2
+     it can be either a filename (string1 string2)
+     or a hardlink string1 => string2
+  */
+  struct stat st;
+  char fn[PATH_MAX];
+  strcpy(fn, basedir);
+  strcat(fn, "/");
+  strcat(fn, line);
+
+  /* if the whole line is not a file, then we are dealing with hardlink case */
+  return (lstat(fn, &st) < 0);
+  /* cannot deal with the situation 
+        str1  is a file
+        str2  is a hardlink to str1
+        str1 str2   is a file
+     AND if we need to sync 
+        str1 and 'str1 str2' at the same time.
+     But this situation is very rare. */
 }
 
 int get_next_entry(int current_file_id)
@@ -187,8 +213,8 @@ int get_next_entry(int current_file_id)
     strcpy(filename, &line[9]);
     if (needBackup(fullname)) cur_entry = -cur_entry;
     return SUCCESS;
-  } else if ((c = strchr(line, ' '))!=NULL) {
-    /* is it a hardlink -- two filename separated by a space */
+  } else if ((c = strchr(line, ' '))!=NULL && is_hardlink_line(line)) {
+    /* is it a hardlink -- two filenames separated by a space */
     char fn[PATH_MAX];
     isHardlink = TRUE;
     strncpy(fn, line, (c - line));

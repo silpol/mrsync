@@ -80,7 +80,7 @@ void init_missing_page_flag(int n)
   if ((missing_page_flag = malloc(n * sizeof(char)))==NULL) {
     fprintf(stderr, "Cannot malloc(%d * sizeof(char))\n", n);
     perror("error = ");
-    exit(0);
+    exit(-1);
   }
   for(i=0; i<nPages; ++i) {
     missing_page_flag[i] = RECEIVED;
@@ -252,7 +252,7 @@ void do_cntl_c(int signo)
   fprintf(stderr, "Control_C interrupt detected!\n");
   send_done_and_pr_msgs();
   kill_pid();
-  exit(0);
+  exit(-1);
 }
 
 /* to do some cleanup before exit IF all machines are bad */
@@ -266,5 +266,5 @@ void do_badMachines_exit(char* machine, int pid)
     kill_pid();
   }
 
-  exit(0);
+  exit(-1);
 }

@@ -1,7 +1,7 @@
 /*
-   Copyright (C)  2006 Renaissance Technologies Corp.
+   Copyright (C)  2006-2008 Renaissance Technologies Corp.
              main developer: HP Wei <hp@rentec.com>
-                verision 3.0 major update
+                version 3.0 major update
                   -- large file support
                   -- platform independence (between linux, unix)
                   -- backup feature (as in rsync)
@@ -21,6 +21,10 @@
                   -- monitor change improvement
                   -- handshake improvement (e.g. seq #)
 		  -- if one machine skips a file, all will NOT close()
+                version 4.0 major update
+                  -- consolidate sending missing pages in complaint flow
+                     cutting the messages by one order magnitude
+                  -- exit code adjustment
 
    Copyright (C)  2005 Renaissance Technologies Corp.
    Copyright (C)  2001 Renaissance Technologies Corp.
@@ -115,19 +119,21 @@ int monitor_cmd(int cmd, int machineID)
      returns TRUE for a machine. Or the monitor_set_up
      should fail. 
   */
-  int count =0;
+  int count =0, resp;
   set_delay(0, FAST);
   send_cmd(cmd, machineID); 
   while (1) { /* wait for ack */
-    if (read_handle_complaint(cmd)==0) {
+    resp = read_handle_complaint(cmd);
+    if (resp<0) { /* time-out */
       ++count;
       send_cmd(cmd, machineID); 
       if (count > SET_MON_WAIT_TIMES) {
 	return FALSE;
       }
-    } else {
+    } else if (resp==1) { /* got ack */
       return TRUE;
     }
+    /* irrevelant resp -- continue */
   }
 }
 
@@ -179,7 +185,7 @@ void set_monitor(int mid)
     return;
   } else {
     fprintf(stderr, "Fatal: monitor %s cannot be set up!\n", id2name(mid));
-    send_done_and_pr_msgs(-1.0);  
+    send_done_and_pr_msgs(-1.0, -1.0);  
     exit(BAD_EXIT);
   }
 }
@@ -255,31 +261,37 @@ void check_change_monitor(int undesired_index)
   free(flags);
   if (monitorID < 0) {
     fprintf(stderr, "Fatal: monitor machine cannot be set up!\n");
-    send_done_and_pr_msgs(-1.0);  
+    send_done_and_pr_msgs(-1.0, -1.0);  
     exit(BAD_EXIT);
   }
 }
 
 void do_one_page(int page)
 {
+  int resp;
   unsigned long rtt;
   refresh_timer();
   start_timer();
   if (!send_page(page)) return;
 
+  /* first ignore all irrelevant resp */
+  resp=read_handle_complaint(SENDING_DATA);
+  while (resp==0) {
+    resp=read_handle_complaint(SENDING_DATA);
+  }
+
   /* read_handle_complaint() waits n*interpage_interval at most */
-  if (read_handle_complaint(SENDING_DATA)==0) {  
+  if (resp==-1) {
     /* delay_sec for readable() is set by set_delay() */
-    /* 
+    /****** 
        at this point, the readable() returns without getting a reply 
        from monitorID after FACTOR*DT_PERPAGE (or DT_PERPAGE if without_monitor)
-    */
-
+       ****/    
     ++no_feedback_count;
     if (verbose>=2) printf("no reply, count = %d\n", no_feedback_count);
     update_rtt_hist(999999);  
     /* register this page as rtt = infinite --- the last element in rtt_hist */
-
+    
     if (no_feedback_count > NO_FEEDBACK_COUNT_MAX) { 
       /* switch to another client */
       if (verbose >=2)
@@ -290,7 +302,7 @@ void do_one_page(int page)
       no_feedback_count = 0;
     }
     return;
-  } else {
+  } else { /* resp == 1 */
     end_timer();
     update_time_accumulator();
     rtt = get_accumulated_usec();
@@ -332,12 +344,11 @@ int main(int argc, char *argv[])
 {
   char c;
   int cfile, ctotal_pages, cpage;
-  int bad_args = FALSE;
   char * source_path       = NULL;
   char * synclist_path     = NULL;
   char * machine_list_file = NULL;
   time_t tloc;
-  time_t time0, time1; 
+  time_t time0, time1, t_page0, t_page; 
 
   while ((c = getopt(argc, argv, "v:w:A:P:T:LI:m:s:f:br:d:Xq")) !=  EOF) {
     switch (c) {
@@ -378,7 +389,7 @@ int main(int argc, char *argv[])
     case 'r':        /* to selectively back up certain files as defined in the pattern */
       if (!read_backup_pattern(optarg)) {
 	fprintf(stderr, "Failed in loading regex patterns in file = %s\n", optarg);
-	bad_args = TRUE;
+	exit(BAD_EXIT);
       }
       break;
     case 'd':
@@ -394,14 +405,14 @@ int main(int argc, char *argv[])
       break;
     case '?':
       usage();
-      bad_args = TRUE;
+      exit(BAD_EXIT);
     }
   }
 
   if (!machine_list_file || !source_path || !synclist_path ) {
     fprintf(stderr, "Essential options (-m -s -f) should be specified. \n");
     usage();
-    bad_args = TRUE;
+    exit(BAD_EXIT);
   }
 
   if (nPattern>0) backup = TRUE;
@@ -412,18 +423,26 @@ int main(int argc, char *argv[])
       fprintf(stderr, 
 	      "src_path (%s) should include (and be longer than) pattern_baseDir (%s)",
 	      source_path, pattern_baseDir);
-      bad_args = TRUE; /* cannot do my_exit() here, since init_send() has not run */
+      exit(BAD_EXIT); 
     }
   }
 
   if (backup && toRmFirst) {
     fprintf(stderr, "-B and -X cannot co-exist\n");
-    bad_args = TRUE;
+    exit(BAD_EXIT);
   }
 
-  if (machine_list_file) { 
-    get_machine_names(machine_list_file);
-    if (!init_synclist(synclist_path, source_path)) bad_args = TRUE;
+  get_machine_names(machine_list_file);
+  if (nTargets==0) {
+    fprintf(stderr, "No target to sync to\n");
+    exit(GOOD_EXIT);
+  }
+
+  if (!init_synclist(synclist_path, source_path)) exit(BAD_EXIT);
+
+  if (total_entries()==0) {
+    fprintf(stderr, "Nothing to sync in %s\n", synclist_path);
+    exit(GOOD_EXIT);
   }
 
   if (verbose >= 2)
@@ -431,7 +450,6 @@ int main(int argc, char *argv[])
 
   /* init the network stuff and some flags */
   init_sends();
-  if (bad_args) my_exit(BAD_EXIT);
   init_complaints();
   init_machine_status(nTargets);
 
@@ -445,6 +463,7 @@ int main(int argc, char *argv[])
 
   init_rtt_hist();
   time0 = time(&tloc);  /* start time */
+  t_page = 0;           /* total time for sending pages */
 
   /* -----------------------------Send the file one by one -----------------------------------*/
   for (cfile = 1; cfile <= total_entries(); cfile++) { /* for each file to be synced */
@@ -493,6 +512,7 @@ int main(int argc, char *argv[])
     refresh_missing_pages(); /* total missing pages for this file for each tar */
         
     /* ----- sending file data ----- first round */
+    t_page0 = time(&tloc);
     no_feedback_count = 0;    
     for (cpage = 1; cpage <= ctotal_pages; cpage++) {
       /* 
@@ -529,7 +549,8 @@ int main(int argc, char *argv[])
 	  ++c; /*************/
 	}
       }
-      fprintf(stderr, "re-sent N_pages = %d\n", c); /*************/
+      if (verbose>=1) 
+	fprintf(stderr, "re-sent N_pages = %d\n", c); /*************/
 
       /* eof */
       reset_has_missing();
@@ -544,6 +565,7 @@ int main(int argc, char *argv[])
       }
     };
 
+    t_page += (time(&tloc) - t_page0);;
     if (do_file_changed_skip()) continue;
 
     /* close file */
@@ -555,6 +577,6 @@ int main(int argc, char *argv[])
   } /* end of the for each_file loop */
 
   time1= time(&tloc);
-  return (send_done_and_pr_msgs( ((double)(time1 - time0))/ 60.0 ));
+  return send_done_and_pr_msgs( ((double)(time1 - time0))/ 60.0, ((double)t_page)/60.0);
 }
 

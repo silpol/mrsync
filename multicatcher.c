@@ -83,7 +83,7 @@ int main(int argc, char *argv[])
 {
   int old_mode;   /* hp: from char to int for mode */
   int mode;
-  char c;
+  int c;
 
   while ((c = getopt(argc, argv, "v:A:P:t:i:u:I:")) !=  EOF) {
     switch (c) {

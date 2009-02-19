@@ -342,7 +342,7 @@ int do_file_changed_skip()
 
 int main(int argc, char *argv[])
 {
-  char c;
+  int c;
   int cfile, ctotal_pages, cpage;
   char * source_path       = NULL;
   char * synclist_path     = NULL;

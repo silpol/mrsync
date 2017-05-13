@@ -1,0 +1,262 @@
+
+   Copyright (C)  2006 Renaissance Technologies Corp.
+                  main developer: HP Wei <hp@rentec.com>
+   Copyright (C)  2005 Renaissance Technologies Corp. 
+   Copyright (C)  2001 Renaissance Technologies Corp.
+                  main developer: HP Wei <hp@rentec.com>
+
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; either version 2, or (at your option)
+   any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program; see the file COPYING.
+   If not, write to the Free Software Foundation,
+   59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.  
+
+20060416 version 3.0
+   This is a major update from previous version 2.1. New features include:
+      -- large file support
+         multicaster can now transfer file whose size is larger than 2**31-1.
+      -- platform independence (between linux, unix)
+         We have tested this independence from a Sun to a Linux machine.
+      -- catching slow machine as the feedback monitor
+         This significantly reduces the number of occurence of SIT-OUT-RECEIVING-FILE cases.
+      -- removing meta-file-info
+         Since our basic algorithm is different from that of Aaron's, the meta-file-info
+         is redundant for in our case.
+      -- backup feature (as in rsync)
+         If the target machines are NFS data servers, backup feature is absolutely
+         necessary. The feature is implemented in the low level multica* codes,
+         I will incorporate it into mrsync.py in the next month or so.      
+      -- mcast options
+         They are now tested and are working.
+         This allows multiple multicasting sessions running simultaneously.
+      -- code cleanup in both mrsync.py and *.c
+      -- code fixing for 64bit arch;
+         tested on Debian 64 bit arch by Nicolas Marot in France
+      -- code provision for IPv6 (but not tested yet)
+
+The mrsync package includes the following files:
+--------------------
+README           -- this file (usage example in the end.)
+#README.more      -- a little more detailed description including
+                    the history of mrsync and its main algorithm.
+GPL.License      -- legal stuff
+mrsync.py        -- the driver script that glues everything together
+mrsync_config.py -- system dependent configuration files
+cmdToTarget.py   -- module to send command to remote machines
+Makefile.Sun
+Makefile.linux
+backup.c                              
+complaint_sender.c                    
+complaints.c                          
+file_operations.c                     
+global.c                              
+id_map.c                              
+inet_pton.c                           
+rttcatcher.c           
+rttcomplaint_sender.c  
+rttcomplaints.c         
+rttmissings.c          
+rttpage_reader.c       
+rttsends.c             
+sends.c                
+set_catcher_mcast.c   
+set_mcast.c	     
+setup_socket.c	     
+signal.c		     
+sock_set_addr.c	     
+timing.c		     
+trFilelist.c          
+multicaster.c    
+multicatcher.c   
+page_reader.c    
+parse_synclist.c 
+rtt.c            
+main.h       
+proto.h      
+rttmain.h    
+rttproto.h   
+signal.h
+
+------------
+To install, 
+------------
+(1) copy these files to a directory on the target and
+    master machines.
+    (All target machines need at least a copy of the
+     multicatcher.)
+    Or the best (efficient) solution is to install the package
+    on a common file server to which all machines can access.
+(2) Depending on which platform you are in,
+    mv Makefile.Sun (or MakeFile.linux) into Makefile.
+(3) edit the system dependent section in Makefile.
+    Especially, the bindir variable.
+    It is used in the 'install' to copy the executable
+    binaries into the destination directory.
+(4) make
+    to compile and generate the executables. (the warnings for format are harmless). 
+(5) make install
+    to copy the executables into $bindir.
+(6) edit mrsync_config.py
+       change the paths for your system.
+       mrsync_config.py is read by mrsync.py
+(7) check if your system has rsync installed 
+    in the directory specified in rsyncPath and remote_rsyncPath
+    in the file mrsync_config.py
+(8) check if your system has python installed.
+    Python, like perl, is included in most linux distribution.
+    As distributed, mrsync.py invokes python through the 1st line
+    !/usr/bin/env python
+    If this does not work for you system, you replace
+    the 1st line of mrsync.py with correct one.
+
+------------------------------
+Usage of mrsync.py
+------------------------------
+
+(1) the function of ping -- 
+    This is removed from multicaster.
+    Instead, please use rtt which gives more useful info.
+    See 'Usage of rtt' below.
+     
+(2) mrsync.py -m /dirX/target.list 
+              -s /dirY/data 
+              -t /dirZ/data 
+
+    This is a routine job carried out at Renaissance Technologies Corp.
+    The file target.list lists the names of all target machines (one name per line).
+
+    Before carrying out multicasting, mrsync.py invokes rsync, 
+    to find those files in the source directory (-s),
+    compared with the target directory (-t) in the first target machine, 
+    that need to be transfered to all target machines.
+    If -t is not specified, then mrysnc assumes that the dest_path
+    on target machines is same as that in -s.
+
+    mrsync.py uses rsync with the following minimum options:
+    --rsh=rsh -avW --dry-run --delete
+    This should work in most of routine cases.
+    This minumum option is specified in mrsync_config.py.
+    I did not test if other combination of options will work
+    so I would advise that you do not change the minimum option.
+
+    However, you can add additional options on top of that minimum
+    options. Use '-o' in mrsync.py
+    e.g.
+    mrsync2.py -m list -s /path/sync/test -t /dest/sync/test -v 1 -o '-H'
+    This turns on --hard-link option in rsync.  But hardlink is very tricky
+    to deal with.  The minumum options supplied in mrsync_config.py is the one
+    that we find works pretty good in terms of dealing with hardlinks.
+    I do find that some rare sequence of syncing sessions requires that I repeat 
+    another round of mrsync.py with additional
+    -o '-H' to set the hardlinks on the targets.
+
+    The output of rsync is stored in a tmp file, which in turn gets
+    parsed by trFilelist.  trFilelist translates the list of files into
+    a specific format for multicaster.
+    The reason for this two step process is to remove direct dependence of
+    multicaster on rsync.
+    The gain is that we can now do the case as shown in (3).
+    
+(3) mrsync.py -m machine1,machine2
+              -s /dirB/data/ 
+              -l *.c,subs/foo*,sub2/path/[0-9][0-9].ext
+    
+    Here have two new things as compared with the case in (2).
+    First, the two target machines are listed directly 
+    in -m option in the form of csv list 
+    (instead of listing them in a machine_list file).
+    Second, the -l option is specified.
+    -l option lists the files that we want to be synced.
+    i.e.  with this option, we bypass the rsync.
+    In this example, we want to sync
+       all /dirB/data/*.c files,
+       all /dirB/data/subs/foo* files,
+       and all /dirB/data/sub2/path/[0-9][0-9].ext
+    The pattern specified should be as those recognizable by 'ls'.
+
+    Obviously, this usage is convenient for syncing small number of
+    specific files to a couple of machines.
+
+(4) mrsync.py -m /dirA/target_list
+              -s /dirB/data
+              -A 239.255.70.88
+              -P 8010
+
+    Same functionality as in (2).
+    But here we specify the multicast IP address and port number
+    for use by both multicatcher and multicaster.
+
+    This allows multiple mrsync sessions to run simultaneously
+    as long as each session uses its own mcast_address and port_number.
+    [ No overlap between sessions. ]
+
+(5) By default, mrsync.py prints out only very essential messages.
+    If you want to see more messages (related to some detailed status including
+    a rtt_histogram at the end of the session),
+    you can spcify '-v 1' in the mrsync.py command line argument list.
+    '-v 2' will print out even more detailed messages --- for debugging purpose!
+
+(6) other options of mrsync.py
+    type 'mrsync.py'  and see them for yourself.
+
+--------------------------------------------------------------------------------
+Usage of rtt
+----------------
+rtt is a utility for testing between master and one machine.
+Its main function is to report the (histogram) distribution of the 
+round-trip-time interval for pages sent.
+I use it to ping a machine
+and to measure the typical rtt time and to see if the network is 
+connected properly.  System administrators can use the rtt time info
+to turn up the network.
+
+Example usage:
+
+(1) on master, I invoke rtt and it gives the report as follows.
+
+master:~ 1>rtt -r ssh -m target -n 1000 -s 64000
+
+using ssh to invoke rttcatcher on target
+Sun Apr 16 17:36:58 EDT 2006
+ssh target '/path/rttcatcher -a 239.255.67.200 -p 7900 1>/dev/null 2>/dev/null & echo $!'
+remote pid = 27283
+Sending data...
+Missing pages =          0 ( 0.00%) out of total pages = 1000
+rtt histogram
+msec counts
+---- --------
+   1 989
+   2 3
+   3 7
+   4 1
+
+ 
+The option -m specifies the name of the target machine.
+-n specifies the number of pages that we want to send.
+-s specifies the size of each page.  (maximum = 64512)
+
+In this example, the total number of pages sent is 1000 
+which is the sum of the counts in the rtt historgram table.
+The histogram shows that the majority of rtt is around 1-2 msec.
+If the network is really busy, the distribution of the histogram 
+will be broadened (instead of concentrated around one particular value).
+
+(2) more options for rtt.
+    type 'rtt'  and see them on the screen.
+
+--------------------------------------------------------------------------------
+
+HP Wei
+hp@rentec.com
+Renaissance Technologies Corp.
+
+    

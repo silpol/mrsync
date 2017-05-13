@@ -2,7 +2,7 @@
 
 # used by mrsync.py to find the executables multicaster, multicatcher, trFilelist
 # hopefully, all machines put them in the same place as on the master machine.
-binDir                = '/dir_path/7281/src/linux1';  # bin
+binDir                = '/a/path/name';  # bin
 rBinDir               = binDir;  # for remote target machines.
 
 # This is a general bookkeeping file for mrsync.py.
@@ -10,7 +10,7 @@ rBinDir               = binDir;  # for remote target machines.
 # Each mrsync.py appends time info into this file.
 # So it should be a path that can be accessed by any machine invoking mrsync.py
 
-multicast_log         = '/dir_path/Sync/multicast.log';
+multicast_log         = '/path/multicast.log';
 
 #---------------------------------------------------------------------------
 # The following three file-names are for tmp storage
@@ -27,11 +27,11 @@ multicast_log         = '/dir_path/Sync/multicast.log';
 #
 # Set it to /dev/null, if we don't want any output.
 #
-catcher_err_log       = '/dir_path/catcher.err';
+catcher_err_log       = '/a_path/catcher.err';
 
 # The goodTargetsFile is for mrsync.py to output names of the machines that are accessible.
 # It is read by multicaster.
-caster_log_dir        = '/dir_path/sync/';   
+caster_log_dir        = '/A_PATH/sync/';   
 goodTargetsFile       = caster_log_dir + 'syncing';
 
 # The file path for storing list of to-be-transfered files

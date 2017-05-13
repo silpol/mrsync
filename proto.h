@@ -1,4 +1,6 @@
 /*  
+   Copyright (C)  2008 Renaissance Technologies Corp.
+                  main developer: HP Wei <hp@rentec.com>
    Copyright (C)  2006 Renaissance Technologies Corp.
                   main developer: HP Wei <hp@rentec.com>
    Copyright (C)  2005 Renaissance Technologies Corp.
@@ -84,7 +86,7 @@ void   page_sent(int page);
 int    nBadMachines();
 void   do_badMachines_exit();
 int    pr_missing_pages();
-int    send_done_and_pr_msgs(double);
+int    send_done_and_pr_msgs(double, double);
 void   do_cntl_c(int signo);
 void   set_has_missing();
 void   reset_has_missing();
@@ -117,6 +119,8 @@ int Mcast_join(int sockfd, const char *mcast_addr,
 void sock_set_addr(struct sockaddr *sa, socklen_t salen, const void *addr);
 
 /* complaint_sender.c */
+void   fill_in_int(int i);
+void   init_fill_ptr();
 void   send_complaint(int complaint, int mid, int page, int file); 
 void   init_complaint_sender();
 #ifndef IPV6
@@ -136,11 +140,12 @@ int    extract_file_info(char * buf, int n_file, unsigned int n_pages);
 int    open_file();
 int    close_file();
 int    rm_tmp_file();
-int    delete_file();
+int    delete_file(int to_check_dir_type);
 int    touch_file();
 int    nPages_for_file();
 int    has_all_pages();
 int    ask_for_missing_page();
+void   missing_page_stat();
 void   write_page(int page, char* data_ptr, int bytes);
 int    is_missing(int page);
 void   page_received(int page);

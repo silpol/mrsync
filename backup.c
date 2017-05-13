@@ -1,5 +1,5 @@
 /*  
-   Copyright (C)  2006 Renaissance Technologies Corp.
+   Copyright (C)  2008 Renaissance Technologies Corp.
                   main developer: HP Wei <hp@rentec.com>
  
    This program is free software; you can redistribute it and/or modify

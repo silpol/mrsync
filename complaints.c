@@ -1,7 +1,6 @@
-/*  
-   Copyright (C)  2006 Renaissance Technologies Corp.
+/*     
+   Copyright (C)  2005-2008 Renaissance Technologies Corp.
                   main developer: HP Wei <hp@rentec.com>
-   Copyright (C)  2005 Renaissance Technologies Corp.
    Copyright (C)  2001 Renaissance Technologies Corp.
                   main developer: HP Wei <hp@rentec.com>
    This file was modified in 2001 and later from files in the program 
@@ -46,7 +45,8 @@ char                flow_buff[FLOW_BUFFSIZE];
 int                *code_ptr;  /* What's wrong? */
 int                *mid_ptr;   /* machine id */
 int                *file_ptr;  /* which file */
-int                *page_ptr;  /* Which page */
+int                *npage_ptr; /* # of pages */
+int                *pArray_ptr;/* missing page arrary */
 
 /* receive socket */
 int                 complaint_fd;
@@ -81,14 +81,17 @@ int my_ACK_WAIT_TIMES = ACK_WAIT_TIMES;
 */
 void init_complaints() 
 { 
+  int rcv_size;
+
   if (verbose>=2)
     fprintf(stderr, "in init_complaints with FLOW_BUFFSIZE = %d\n", FLOW_BUFFSIZE);
  
   /* get pointers set to the right place in buffer */
-  code_ptr = (int *) flow_buff;
-  mid_ptr  = (int *) (code_ptr + 1);
-  file_ptr = (int *) (mid_ptr + 1);
-  page_ptr = (int *) (file_ptr + 1);
+  code_ptr  = (int *) flow_buff;
+  mid_ptr   = (int *) (code_ptr + 1);
+  file_ptr  = (int *) (mid_ptr + 1);
+  npage_ptr = (int *) (file_ptr + 1);
+  pArray_ptr= (int *) (npage_ptr+1);
 
   /*  Receive socket (the default buffer size is 65535 bytes */
   if (verbose>=2) printf("set up receive socket for complaints\n");
@@ -98,10 +101,13 @@ void init_complaints()
      getsockopt(complaint_fd, SOL_SOCKET, SO_RCVBUF, &i, &il);
      printf(" rcvbuf = %d  type = %d\n", i, il);
      exit(0);
-  the default in our machines -> size = 65535 and type = 4 
-  Since our flow_buff size is only sizeof(int)*4 bytes,
-  65535 bytes buffer can handle more than 4K pages at a time!
+     the default in our machines -> size = 65535 and type = 4 
   */
+ 
+  rcv_size = TOTAL_REC_PAGE * FLOW_BUFFSIZE;
+  if (setsockopt(complaint_fd, SOL_SOCKET, SO_RCVBUF, &rcv_size, sizeof(rcv_size)) < 0){
+    perror("Expanding receive buffer for init_complaints");
+  }
 }
 
 void init_missing_page_flag(int n)
@@ -233,7 +239,6 @@ void init_machine_status(int n)
   refresh_file_received();
 
   skip_count = 0;
-  quitWithOneBad = FALSE;
 
   last_seq = malloc(n * sizeof(int));
   for(i=0; i<nMachines; ++i) {
@@ -250,10 +255,11 @@ int read_handle_complaint(int cmd)
 {
   /* 
      cmd = cmd_code -- each cmd expects different 'response' (complaints)
-     return 1 for receiving complaint
-     return 0 for no complaint handled 
+     return 1  for complaint handled
+     return 0  for irrelevant complaint 
+     return -1 for time-out
   */
-  int mid_v, code_v, file_v, page_v, bytes_read;
+  int mid_v, code_v, file_v, npage_v, bytes_read;
 
   if (readable(complaint_fd)) {
     /* There is a complaint */
@@ -263,30 +269,29 @@ int read_handle_complaint(int cmd)
        convert incoming integers into host representation */
 
     mid_v = ntohl(*mid_ptr);
-    
             
-    if ((bytes_read != FLOW_BUFFSIZE) || (mid_v < 0 ) ||
+    if ((bytes_read < FLOW_HEAD_SIZE) || (mid_v < 0 ) ||
 	(mid_v >= (unsigned int) nMachines)  || /* boundary check for mid_v for safety */
 	(bad_machines[mid_v] == BAD_MACHINE)) { /* ignore complaint from a bad machine*/
       return 0; 
     }
 
-    code_v = ntohl(*code_ptr); 
-    file_v = ntohl(*file_ptr);
-    page_v = ntohl(*page_ptr);
+    code_v  = ntohl(*code_ptr); 
+    file_v  = ntohl(*file_ptr);
+    npage_v = ntohl(*npage_ptr);
 
     /* check if the complaint is for the current file */
     if (code_v != MONITOR_OK && file_v != current_entry()) return 0; 
     /* out of seq will be ignored */
-    if (code_v != MISSING_PAGE) {
-      if (page_v <= last_seq[mid_v]) return 0;
-      else last_seq[mid_v] = page_v;
+    if (code_v != MISSING_PAGE && code_v != MISSING_TOTAL) { /********* MISSING_TOTAL ? *************/
+      if (npage_v <= last_seq[mid_v]) return 0;
+      else last_seq[mid_v] = npage_v;
     }
 
     switch (code_v) {
     case PAGE_RECV:
       /********  check if machineID is the one we have set. */
-      if (verbose>=2) fprintf(stderr, "mid_ptr-> %d, monitorid = %d\n", mid_v, monitorID);
+      /*if (verbose>=2) fprintf(stderr, "mid_ptr-> %d, monitorid = %d\n", mid_v, monitorID);*/
       if (cmd == SENDING_DATA && mid_v == monitorID)
 	return 1;
       else
@@ -294,6 +299,7 @@ int read_handle_complaint(int cmd)
 
     case MONITOR_OK:
       /*********  check if machineID is the one we have set. */
+      if (verbose>=2) fprintf(stderr, "mid_ptr-> %d, monitorid = %d\n", mid_v, monitorID);
       if (cmd == SELECT_MONITOR_CMD && mid_v == monitorID)
 	return 1;
       else
@@ -326,15 +332,26 @@ int read_handle_complaint(int cmd)
 
     case MISSING_PAGE :
       if (cmd != EOF_CMD || file_received[mid_v]==FILE_RECV) return 0;
-      if (page_v < 1 || page_v > nPages) return 0;  /* page # (1 origin) */
-      ++(total_missing_page[mid_v]);
-      ++(missing_pages[mid_v]);
-      missing_page_flag[page_v-1] = MISSING; /* the packet may not arrive at master */     
+      if (npage_v > nPages) return 0; 
+      {
+	int i, *pi, page_v;
+	pi = pArray_ptr;
+	for (i = 0; i<npage_v; ++i) {
+	  page_v = ntohl(pi[i]);
+          if (page_v<1 || page_v > nPages) continue; /*** make sure page_v starts with 1*/
+	  missing_page_flag[page_v-1] = MISSING;
+	}
+      }
+      missing_pages[mid_v] += npage_v;	
       set_has_missing(); 
       return 1;
 
     case MISSING_TOTAL:
-      if (cmd != EOF_CMD || file_received[mid_v]==FILE_RECV) return 0;
+      if (cmd != EOF_CMD || file_received[mid_v]==FILE_RECV ||  machine_status[mid_v] == MACHINE_OK) 
+	return 0;
+      /* Consider to add: if npage_v >missing_pages[mid_v], ask to resend 
+	 [ likely no big gain ] */
+      total_missing_page[mid_v] += npage_v;
       set_has_missing();                     /* store the info about missing info */      
       machine_status[mid_v] = MACHINE_OK;    /* machine_status serves as ack only */      
       return 1;
@@ -356,7 +373,7 @@ int read_handle_complaint(int cmd)
   } /* end of if(readable) */
 
   /* time out of readable() */
-  return 0;
+  return -1;
 }
 
 int all_machine_ok()
@@ -372,7 +389,7 @@ int all_machine_ok()
 /* this is for the master to receive the acknowledgement. */
 void wait_for_ok(int code)
 {
-  int i, count;
+  int i, count, resp;
   time_t tloc;
   time_t rtime0, rtime1; 
   
@@ -380,10 +397,16 @@ void wait_for_ok(int code)
  
   count = 0;
   while (!all_machine_ok()) {
-    if (read_handle_complaint(code)==1) { /* if there is a complaint handled */
+    resp = read_handle_complaint(code);
+    if (resp==1) { /* if there is a complaint handled */
       rtime0 = time(&tloc);          /* reset the reference time */
       continue;
     }
+
+    if (resp==0) { /* irrelevant complaint received */
+      continue;
+    }
+    
     /* no complaints handled within the time period set by set_delay() */
     rtime1 = time(&tloc);    /* time since last complaints */
     if ((rtime1-rtime0) >= ACK_WAIT_PERIOD) {
@@ -404,7 +427,8 @@ void wait_for_ok(int code)
 	fprintf(stderr, "   Drop these bad machines:[ ");
 	for(i=0; i<nMachines; ++i) {
 	  if (machine_status[i] == NOT_READY && bad_machines[i] == GOOD_MACHINE) {
-	    fprintf(stderr, "%d ", i);
+	    /* fprintf(stderr, "%d ", i); */
+	    fprintf(stderr, "%s ", id2name(i));
 	    bad_machines[i]= BAD_MACHINE;
 	    /* 
 	       The pages sent by the master will be ignored by
@@ -495,42 +519,54 @@ int choose_print_machines(char *stArray, char selection, char * msg_prefix)
   return count;
 }
 
-int send_done_and_pr_msgs(double total_time)
+int send_done_and_pr_msgs(double total_time, double t_page)
 {
   int exit_code1 =0;
   int exit_code2 =0;
   int exit_code3 =0;
 
   send_all_done_cmd();
-  
+
+  /* exit_code1 !=0 if there are files that were not delivered due to change or skipped */  
   exit_code1 = pr_missing_pages();
 
   fprintf(stderr, "Total time spent = %6.2f (min) ~ %6.2f (min/GB)\n\n", 
 	  total_time, total_time / ((double)real_total_bytes/1.0e9));
+  fprintf(stderr, "Send pages time  = %6.2f (min) ~ %6.2f (min/GB)\n\n", 
+	  t_page, t_page / ((double)real_total_bytes/1.0e9));
 
   exit_code2 = choose_print_machines(bad_machines, 
 				     BAD_MACHINE, 
 				     "Not synced for bad machines:[ ");
 
-  if (current_entry() < total_entries()) { /* if we exit prematuredly */
+  if (quitWithOneBad && nBadMachines() >=1) {
+    fprintf(stderr, "We choose to exit when at least one target is bad\n");
+    fprintf(stderr, "All files following the current one did not get delivered\n");
+    fprintf(stderr, "If resend cmd(CLOSE_FILE), then the current file may have been delivered to non-bad targets\n\n");
+  }
+
+  if (current_entry() < total_entries()) { /* if we exit prematurely */
     exit_code3 = choose_print_machines(machine_status, 
 				       NOT_READY, "\nNot-ready machines:[  ");
   }
 
   if (verbose>=1) pr_rtt_hist();
-  return (exit_code1+exit_code2+exit_code3);
+  return (exit_code1+exit_code3); /* 200807 removed exit_code2 because bad machines case has been dealt with 
+                                     by -q.  If no -q, then the bad machines are considered 'harmless' */
 }
 
 /* to do some cleanup before exit IF all machines are bad */
 void do_badMachines_exit()
 {
-  if ((quitWithOneBad && nBadMachines() != 0) ||
+  if ((quitWithOneBad && nBadMachines() < 1) ||
       (!quitWithOneBad && (nBadMachines() < nMachines))) return;
+
   if (quitWithOneBad)
-    fprintf(stderr, "One machine is bad. Exit!\n");
+    fprintf(stderr, "One (or more) machine is bad. Exit!\n");
   else
     fprintf(stderr, "All machines are bad. Exit!\n");
-  send_done_and_pr_msgs(-1.0);
+
+  send_done_and_pr_msgs(-1.0, -1.0);
   exit(-1);
 }
 
@@ -538,6 +574,6 @@ void do_cntl_c(int signo)
 {  
   fprintf(stderr, "Control_C interrupt detected!\n");
 
-  send_done_and_pr_msgs(-1.0);  
+  send_done_and_pr_msgs(-1.0, -1.0);  
   exit(-1);
 }

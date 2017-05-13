@@ -1,4 +1,6 @@
 /* 
+   Copyright (C)  2008 Renaissance Technologies Corp.
+                  main developer: HP Wei <hp@rentec.com>
    Copyright (C)  2006 Renaissance Technologies Corp.
                   main developer: HP Wei <hp@rentec.com>
    Copyright (C)  2005 Renaissance Technologies Corp. 
@@ -59,7 +61,7 @@
 #include        <sys/times.h>
 #include        <limits.h>
 
-#define     VERSION        "3.2.7"
+#define     VERSION        "4.0.0"
 
 /* logic values */
 #define     FALSE   0
@@ -105,7 +107,7 @@
 #define     WRITE_WAIT_SEC  0
 #define     WRITE_WAIT_USEC 100000
 
-#define     SET_MON_WAIT_TIMES    3000 /* time = this number * FAST */
+#define     SET_MON_WAIT_TIMES    6000 /* time = this number * FAST */
 #define     NO_FEEDBACK_COUNT_MAX 10
 #define     SWITCH_THRESHOLD      50 /* to avoid switching monitor too frequently
                                         because of small diff in missing_pages */
@@ -128,12 +130,13 @@
 #define     PAGE_BUFFSIZE  (PAGE_SIZE + HEAD_SIZE)
 #define     TOTAL_REC_PAGE 20 /* change to 4 in case hit the OS limit in buf size */
 
-#define     FLOW_BUFFSIZE  (sizeof(int)*4)
-
+#define     FLOW_HEAD_SIZE (sizeof(int)*4)
+#define     FLOW_BUFFSIZE  (PAGE_SIZE+FLOW_HEAD_SIZE)
+#define     MAX_NPAGE      (PAGE_SIZE / sizeof(int))
 /* 
    Modes and command codes:
    The numerical codes are also the index to retrieve the command names 
-   to print in complaints.c
+   for printing in complaints.c
 */
 #define     TIMED_OUT          0
 #define     TEST               1

@@ -1,4 +1,5 @@
-
+   Copyright (C)  2008 Renaissance Technologies Corp.
+                  main developer: HP Wei <hp@rentec.com>
    Copyright (C)  2006 Renaissance Technologies Corp.
                   main developer: HP Wei <hp@rentec.com>
    Copyright (C)  2005 Renaissance Technologies Corp. 
@@ -56,47 +57,53 @@ version 3.2.0
       -- monitor change improvement
       -- handshake improvement (e.g. seq #)
       -- if one machine skips a file, all will NOT close()
+version 4.0.0
+      -- previously, missing page report is sent back one page
+         at a time. I change it to ~60K pages at a time. This
+         drastically reduces the network traffic.
+         Performance (syncing time) is in general improved.
+      -- clean up scheme in choosing a monitor machine.
+      -- misc code cleaning up and minor adjustments.
 
 The mrsync package includes the following files:
 --------------------
 README           -- this file (usage example in the end.)
+README.more      -- another readme.
 GPL.License      -- legal stuff
 mrsync.py        -- the driver script that glues everything together
 mrsync_config.py -- system dependent configuration files
 cmdToTarget.py   -- module to send command to remote machines
 Makefile.Sun
 Makefile.linux
-backup.c                              
-complaint_sender.c                    
-complaints.c                          
-file_operations.c                     
-global.c                              
-id_map.c                              
-inet_pton.c                           
-rttcatcher.c           
-rttcomplaint_sender.c  
-rttcomplaints.c         
-rttmissings.c          
-rttpage_reader.c       
-rttsends.c             
-sends.c                
-set_catcher_mcast.c   
-set_mcast.c	     
-setup_socket.c	     
-signal.c		     
-sock_set_addr.c	     
-timing.c		     
-trFilelist.c          
-multicaster.c    
-multicatcher.c   
-page_reader.c    
-parse_synclist.c 
-rtt.c            
+backup.c
+complaint_sender.c
+complaints.c
+file_operations.c
+global.c
+id_map.c
+multicaster.c
+multicatcher.c
+page_reader.c
+parse_synclist.c
+rtt.c
+rttcatcher.c
+rttcomplaint_sender.c
+rttcomplaints.c
+rttmissings.c
+rttpage_reader.c
+rttsends.c
+sends.c
+set_catcher_mcast.c
+set_mcast.c
+setup_socket.c
+signal.c
+timing.c
+trFilelist.c
 main.h       
+rttproto.h
 proto.h      
-rttmain.h    
-rttproto.h   
 signal.h
+rttmain.h
 
 ------------
 To install, 

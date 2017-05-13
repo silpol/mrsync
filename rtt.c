@@ -150,7 +150,7 @@ int invoke_catcher(char * machine)
 
 int main(int argc, char *argv[])
 {
-  char c;
+  int c;
   int nPages =-1, pageSize=-1, ipage;
   
   verbose = 0;

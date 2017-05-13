@@ -61,7 +61,7 @@
 #include        <sys/times.h>
 #include        <limits.h>
 
-#define     VERSION        "4.0.0"
+#define     VERSION        "4.0.1"
 
 /* logic values */
 #define     FALSE   0

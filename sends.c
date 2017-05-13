@@ -1,4 +1,6 @@
 /* 
+   Copyright (C)  2008 Renaissance Technologies Corp.
+                  main developer: HP Wei <hp@rentec.com>
    Copyright (C)  2006 Renaissance Technologies Corp.
                   main developer: HP Wei <hp@rentec.com>
    Copyright (C)  2005 Renaissance Technologies Corp.
@@ -214,9 +216,9 @@ int send_page(int page)
       (nPages == page && bytes != last_bytes)) {
     /* file under sync must have been changed during syncing */
     fprintf(stderr, "Warning: read() error, expected_bytes= %d, real= %d, "
-	    "page = %d, nPages = %d, for file %s\n",
+	    "page = %d, nPages = %s%d, for file %s\n",
 	    (page<nPages) ? PAGE_SIZE : last_bytes, 
-	    bytes, page, nPages, getFullname());
+	    bytes, page, (current_entry()<0) ? "-" : "", nPages, getFullname());
     file_changed = TRUE;
     /* make corrections in total_xxx that we send 
        otherwise the final statistic will be messed up */

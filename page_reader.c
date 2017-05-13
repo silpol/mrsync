@@ -1,4 +1,6 @@
 /* 
+   Copyright (C)  2008 Renaissance Technologies Corp.
+                  main developer: HP Wei <hp@rentec.com> 
    Copyright (C)  2006 Renaissance Technologies Corp.
                   main developer: HP Wei <hp@rentec.com> 
    Copyright (C)  2005 Renaissance Technologies Corp.
@@ -189,7 +191,7 @@ int read_handle_page()
 	/* different tasks here */
 	/* open file, rmdir, unlink */
 	if (total_pages_v < 0) { /* delete a file or a directory */
-	  if (!delete_file()) return mode_v; /* this fx can be re-entered many times */	  
+	  if (!delete_file(TRUE)) return mode_v; /* this fx can be re-entered many times */	  
 	  /* machineState remains to be IDLE_STATE */
 	} else if (total_pages_v == 0) { 
 	  /* handle an empty file, or (soft)link or directory */
@@ -239,7 +241,7 @@ int read_handle_page()
       if ((current_page_v == (int) ALL_MACHINES || current_page_v == (int) machineID)
 	  && machineState == GET_DATA_STATE) { /* GET_DATA_STATE */
 	/* check missing pages and send back missing-page-request */
-	current_missing_pages = ask_for_missing_page();
+	current_missing_pages = ask_for_missing_page(); /* = total # of missing_pages */
 
 	if (current_page_v == (int) machineID) {
 	  /* master is asking for my EOF_ack */
@@ -250,6 +252,7 @@ int read_handle_page()
 	  } else {	  
 	    send_complaint(MISSING_TOTAL, machineID, 
 			   current_missing_pages , current_file_id);
+	    missing_page_stat(); /* this has to be done before close_file() ******************/
 	  }
 	  return mode_v;
 	}
@@ -292,12 +295,14 @@ int read_handle_page()
 	      /* not sick enough yet */
 	      send_complaint(MISSING_TOTAL, machineID, 
 			     current_missing_pages, current_file_id);
+	      missing_page_stat(); /* this has to be done before close_file() ******************/
 	      /* master will send more pages */
 	    }
 	  } else { /* we are getting enough missing pages this time to keep up */
 	    sick_count = 0; /* break the consecutiveness */
 	    send_complaint(MISSING_TOTAL, machineID, 
 			   current_missing_pages, current_file_id);
+	    missing_page_stat(); /* this has to be done before close_file() ******************/
 	    /* master will send more pages */
 	  }
 	  last_missing_pages = current_missing_pages;	  

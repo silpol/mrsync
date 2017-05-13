@@ -114,7 +114,7 @@ if not len(opts) == 0:
         elif o=='-x':
             without_monitor = True;
 
-if verbose>=1: print 'mrsync version 3.1.2';
+if verbose>=1: print 'mrsync version 4.0.0';
 
 if not machineListFile or not sourcePath:
     print >>sys.stderr, 'Essential options (-m -s) should be specified.';
@@ -223,7 +223,7 @@ def gen_catcher_cmd(count):
                             (mcast_addr and '-A '+mcast_addr or ''),
                             (port>0 and '-P %d'%port or ''),
                             (mcast_if and '-I %s'%mcast_if or ''),
-                            '1>/dev/null 2>%s &' % catcher_err_log]));
+                            '</dev/null 1>/dev/null 2>%s &' % catcher_err_log])); ### workaround ssh problem
     
 def invoke_catcher(ms, count, bads):
     "invoke catcher for each machine in ms, return bad_machines in bads"

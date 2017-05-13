@@ -1,4 +1,6 @@
 /*
+   Copyright (C)  2008 Renaissance Technologies Corp.
+                  main developer: HP Wei <hp@rentec.com>  
    Copyright (C)  2006 Renaissance Technologies Corp.
                   main developer: HP Wei <hp@rentec.com>  
    Copyright (C)  2005 Renaissance Technologies Corp.
@@ -126,11 +128,11 @@ int invoke_catcher(char * machine)
 
   if (!my_IFname) {
     sprintf(buf, 
-	    "%s %s '%s/rttcatcher -A %s -P %d 1>/dev/null 2>/dev/null & echo $!'", 
+	    "%s %s '%s/rttcatcher -A %s -P %d < /dev/null 1>/dev/null 2>/dev/null & echo $!'", 
 	    reshell, machine, catcher_path, my_MCAST_ADDR, my_PORT);
   } else {
     sprintf(buf, 
-	    "%s %s '%s/rttcatcher -A %s -P %d -I %s 1>/dev/null 2>/dev/null & echo $!'", 
+	    "%s %s '%s/rttcatcher -A %s -P %d -I %s < /dev/null 1>/dev/null 2>/dev/null & echo $!'", 
 	    reshell, machine, catcher_path, my_MCAST_ADDR, my_PORT, my_IFname);
   }
   

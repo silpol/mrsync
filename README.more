@@ -1,0 +1,353 @@
+   Copyright (C)  2008 Renaissance Technologies Corp. 
+	          main developer: HP Wei <hp@rentec.com>
+   Copyright (C)  2006 Renaissance Technologies Corp. 
+	          main developer: HP Wei <hp@rentec.com>
+   Copyright (C)  2005 Renaissance Technologies Corp. 
+   Copyright (C)  2001 Renaissance Technologies Corp.
+                  main developer: HP Wei <hp@rentec.com>
+
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; either version 2, or (at your option)
+   any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program; see the file COPYING.
+   If not, write to the Free Software Foundation,
+   59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.  
+
++------------+
+| CHANGE LOG |
++------------+
+Jul - Oct 2008 -- version 4.0
+                  -- previously, missing page report is sent back one page
+                     at a time. I change it to ~60K pages at a time. This
+                     drastically reduces the network traffic.
+                  -- clean up scheme in choosing a monitor machine.
+Feb - May 2006 -- version 3.0
+	        verision 3.0.0 major update
+                  -- large file support
+                  -- platform independence (between linux, unix)
+                  -- backup feature (as in rsync)
+                  -- removing meta-file-info
+                     We transmit the file_stat info right before
+                     the file is being synced. And the file-stat info
+                     is transfered by ascii format to avoid byte-ordering
+                     translation.
+                     The orignal meta_data is not necessay under this scheme.
+                  -- catching slow machine as the feedback monitor
+                     [ the signal_handler scheme in version 2.0 is
+                       removed. ]
+		  -- mcast options
+                version 3.0.[1-9] bug fixes
+                  -- logic flaw which under certain condition
+		     caused premature dropout due to 
+                     unsuccessful EOF, CLOSE_FILE 
+                     and caused unwanranted SIT-OUT cases.
+		  -- tested on Debian 64-bit arch by Nicolas Marot in France
+                     Nicolas also translated mrsync.py to mrsync.sh
+                     (nicolas.marot@gmail.com)
+	        version 3.1.0
+		  -- codes for IPv6 are ready (but not tested)
+		     IPv4 is tested ok.
+
+June 9, 2005 -- version 2.1
+            Clint Byrum at clint@careercast.com asks about the exit status
+            of multicaster, which is changed so that it exits whenever
+            there are bad_machines or files_sat_out.
+May 2005 -- Second version 
+            The major changes are:
+              (1) implementing congestion control so that mrsync is more
+                  net-traffic-friendly.
+              (2) using python script as the glue to put everything together.
+                  i.e. the previous mrsync.c is replaced by mrsync.py
+            Other changes collected over the years through interactions with
+            users include:
+              (1) adding options to change the default IP address for multicast,
+                  and the default port number for flow control.
+                  This was suggested by Robert Dack <robd@kelman.com>
+              (2) replacing memory mapped file IO with the usual
+                  seek() and write() sequence.
+                  This change was echoed by Clint Byrum <clint@careercast.com>
+              (3) adding verbose control so that by default mrsync prints
+                  only essential info instead of detailed status report.
+                  This was suggested by Clint Byrum <clint@careercast.com>
+
+Jan 2002 -- First version uploaded to http://freshmeat.net/projects/mrsync/
+            The tar file is in ftp://felder.org/pub/mrsync.tar
+
++-----------------+
+| MRSYNC vs RSYNC |
++-----------------+
+mrsync is a package that consists of utilities for transfering 
+a bunch of files from a master machine to multiple target 
+machines simultaneously 
+by using the multicasting capability in the UNIX system. 
+The name 'mrsync' is inspired by the 
+popular utility 'rsync' for synchronizing files between
+two machines. However, beyond this similarity in the 
+functionality, mrsync is fundamentally different from rsync
+in three areas.
+(1) rsync uses TCP while mrsync needs UDP in order
+    to use the multicasting part of UNIX's socket communication.
+    The former limits the data commuinication to one-to-one-machine
+    whereas the latter allows one-to-many.
+    UDP has, however, no built in flow control. As a result,
+    the major part of mrsync 
+    (more precisely, the multicaster and multicatcher), 
+    is devoted to synchronizing the data flow.
+(2) For a given file,
+    rsync transfers optionally only those parts in the file 
+    that are different
+    in the two versions on the master and the target machine.
+    This saves time, esp on a slow network. 
+    mrsync, in contrast, transfers the whole content of a file
+    to all targets at one time. The time gain of mrsync comes from
+    its concurrency as described in (3).
+(3) Replicated data servers have become poplular to serve 
+    thousands of clients. Using rsync to replicate the data
+    to hundreds of disks is very time consuming. The total
+    time it takes is proportional to the number of target
+    disks. In contrast, mrsync scales much better because
+    it puts the contents of the file on the network only one
+    time. e.g. we have used mrsync to transfer 140GB of data
+    to 100 machines in a 1Gbit LAN in about 4-6 hours.
+
+This project has started in 2001. We have been using the tool
+every day. 
+Recently, I have upgraded this tool to handle large-files,
+to make it platform independent, and to make it 64bit ready.  
+The current version is 4.0.0 which is stable.
+It has been used by many people in the UNIX community.
+Lately, people in France has helped me test the code on 64bit arch.
+They are proposing to make it a standard package in the Debian distribution.
+
+mrsync was originally posted on Freshmeat.net. But the link there
+points to one of our company's disks.  We would like to find a place
+on SourceForge.net for this package.
+
+
+
++-------------------+
+| HISTORY OF MRSYNC |
++ ------------------+
+The project of mrsync stemmed from the necessity to transfer
+many files to hundreds of machines running Linux at Renaissance 
+Technologies Corp. Looking into the Open Source Community, we found
+a preliminary utility codes of multicasting written by Aaron Hillegass.  
+Many unsuccessful test-runs on a huge amount of data files, however,
+led us to embark on an overhaul of the code.  
+Most of the following items were inherited and bug-fixed from 
+the original codes.
+* The low level functions that 
+  interact with UNIX's multicasting sockets.
+* Meta_data -- the essential info about a file which the master
+  machine will first transmit to the target machines.
+  [ removed in 2006 (see above change log)].
+* Division of a file into many 'pages'.
+* The idea of maintaining a missing page flag.
+* The idea of a multicaster and multicatcher loop. 
+ 
+In this mrsync, we develop two new critical elements:
+flow-control message communication conducted by the multicaster,
+and a four-state page reader (processor) in the multicatcher.
+The former is to synchronize the task each machine is performing.
+For example, the master will not start sending 
+the pages of a file unless all machines have acknowledged
+the completion of openning the disk i/o for the file.
+In order to accomodate these elements, the codes have been 
+changed significantly from the original version.
+For example, the multicatcher now never asks for slowing down.
+And multicaster sends data on a file-by-file basis.
+The file integrity is achieved by orchestrating the 
+data flow which is closely monitored and conducted 
+by the master machine.
+
+[200505] we add congestion control into the code.
+After the master sends one page for a file, it will not send 
+the next page until it receives the acknowledgement (ack) message
+sent by a monitor target (a feedbacker if you will).
+This simply-minded congestion control prevents sending pages
+at a pace with which a busy network cannot digest.
+The feedbacker is chosen at the initialization stage of multicaster.
+It may be changed by multicaster whenever it fails to send back 
+ack message within a certain duration.
+
+[2006] The monitor machine will send back ack message
+only after it has written the page to disk. This way the 'rtt'
+calculated by the master machine includes the disk IO time,
+instead of just the network-traffic time. The master also 
+selects the slowest target machine as the monitor machine.
+These two ingredients provide more precise picture of 
+how busy the whole system is, and thus tend to leave no target
+machine behind.
+
+As of today, mrsync has been in full use at Renaissance 
+on a regular basis.
+
++-------------------+
+| TEST RUNNING TIME |
++-------------------+
+[200810] using version 4.0.0. The performance improves (if the target machines
+         are not busy).
+         Number of targets = 32. All linux machines on 1Gbit network.
+
+Total number of files =          283 Pages w/o ack =            0 (  0.00%)
+Total number of pages =       100129 Pages re-sent =         6852 (  6.84%)
+Total number of bytes =   6449407171 Bytes re-sent =    442030792 (  6.85%)
+Total time spent =   2.55 (min) ~   0.37 (min/GB)
+
+Send pages time  =   1.78 (min) ~   0.26 (min/GB)
+
+rtt histogram
+msec counts
+---- --------
+   0 103415
+   1 1985
+   2 162
+   3 73
+   4 145
+   5 68
+   6 253
+   7 203
+   8 305
+   9 184
+  10 156
+
+[200604] using version 3.x.x, here is an example of the final statistics
+         in one of our routine syncing jobs.
+         Number of targets = 32. All linux machines on 1Gbit network.
+
+total number of files = 4076
+Total number of pages =       480719 Pages re-sent =        39994 (  8.32%)
+Total number of bytes =  30875638130 Bytes re-sent =   2573924662 (  8.34%)
+Total time spent =  39.50 (min) ~   1.18 (min/GB)
+
+rtt histogram
+msec counts
+---- --------
+   0 371023
+   1 118874
+   2 21977
+   3 3779
+   4 2226
+   5 760
+   6 584
+   7 580
+   8 288
+   9 162
+  10 92
+  ...
+         
+[200201]
+25 minutes for a group of files whose total size amounts to 4.6GB.
+(This data is obtained from running on 5 SUN machines 
+ with Solaris 8 on an Ethernet LAN whose bandwidth is 100Mbits/sec.)  
+   
++-------------------------------------+
+| MAIN ALGORITHM FOR SENDING ONE FILE |
++-------------------------------------+
+In the multicaster code running on the master machine:
+In the initialization stage, the code selects one target machine
+as a monitor machine (feedbacker), which sends back acknowledgement
+message when one page is received.
+The main loop for multicaster is as follows.
+(1) Send OPEN_FILE command (message).
+(2) Wait for all machine to send back acknowledgement (ack).
+(3) If any machine does not ack back within a certain time period, 
+    that machine is considered bad and is dropped out
+    of the monitoring list.
+    During that waiting time period, the master sends the
+    OPEN_FILE message to those potentially bad machines regularly.
+(4) Start sending pages, 
+    (all pages, in the first time round; 
+     those missing pages reported back by target machines, in other rounds).
+    During this period, all target machines except the feedbacker, if activated,
+    just receive and process whatever pages that arrive at the receive buffer.
+
+    There are two modes of operation for the master to send these pages.
+    (a) When the congestion control is turned off (-x option in mrsync.py)
+        the master sends out one page and wait for a duration (interpage interval),
+        which is specified as DT_PERPAGE in main.h, before it sends the next one.
+    (b) If the congestion control is turned on (the default behavior of mrsync.py),
+        the master will not send the next page until it receives the ack.
+        On the feedbacker, once a SIGIO is triggered indicating the arrival
+        of a page, it sends back ack message to the master.
+(5) Send EOF message to signal the end of transmission 
+    for this file.
+(6) Wait for all machines to send back ack.
+    They either report ok
+    or report a list of page numbers that are missing.
+(7) If any machine does not ack back within a certain time period, 
+    that machine is considered bad and is dropped out
+    of the monitoring list.
+    During that waiting time period, the master sends the
+    EOF message to those potentially bad machines regularly.
+(8) If there are missing pages, go back to (4).
+(9) Send CLOSE_FILE message.
+(10) Wait for all machine to send back ack.
+(11) If any machine does not ack back within a certain time period, 
+     that machine is considered bad and is dropped out
+     of the monitoring list.
+     During that waiting time period, the master sends the
+     CLOSE_FILE message to those potentially bad machines regularly.
+(12) If there are more files to transfer, go back to (1).
+
+
+In multicatcher running on the target machine:
+the main loop performs the following steps,
+(1) Start with IDLE_STATE.
+(2) Upon receiving OPEN_FILE and being in IDLE_STATE, 
+       set up a momory mapped temporary file whose size
+       equals that specified in the meta_data, 
+       which has been received in prior time.
+    if things are not successful, 
+       don't send back ack.
+    else 
+       send back ack and enter GET_DATA_STATE.
+(3) Upon receiving one UDP and being in GET_DATA_STATE,
+       store it into the right place in the temporary file.
+    Expect to receive more UDP data and go back to (3).
+(4) Upon receiving EOF and being in GET_DATA_STATE,
+       if there are some missing pages, 
+          report them and expect to go back to (3).
+       else there are no missing page, 
+          send back ack and enter DATA_READY_STATE.
+       if there is sick conditions,
+          send back ack and enter SICK_STATE.
+(5) Upon receiving CLOSE_FILE and being in DATA_READY_STATE,
+    if in DATA_READY_STATE,
+       rename(temporary_file, the_real_filename),
+       clean up the memory mapped area.
+       if things go well,
+          send back the ack, enter IDLE_STATE 
+          and expect to go back to (1),
+       else don't send back ack.
+    else if in SICK_STATE,
+       send back sit_out ack, enter IDLE_STATE
+       and expect to go back to (1).
+
+In addition to the above main loop that runs on all target machines,
+the selected monitor machine (feedbacker) needs to send back
+an received_ack message for every page received and processed.
+
+--------------------------------------------------------------
+Note: The original version dealt with three types of 'files':
+      directory, softlink and regular file.
+      mrsync includes one more: hardlink file.
+
+HP Wei
+hp@rentec.com
+Renaissance Technologies Corp.
+Nov 15, 2001 (first version)
+May 20, 2005 (second version)
+Apr 16, 2006 (third version)
+Oct 28, 2008 (fourth version)
+
+
+

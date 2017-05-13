@@ -1,4 +1,6 @@
 /*  
+   Copyright (C)  2008 Renaissance Technologies Corp. 
+                  main developer: HP Wei <hp@rentec.com>
    Copyright (C)  2006 Renaissance Technologies Corp. 
                   main developer: HP Wei <hp@rentec.com>
       This file contains all the file-operations for multicatcher.
@@ -55,7 +57,7 @@ extern int verbose;
 extern int machineID;
 
 char              * baseDir = NULL;
-char              * missingPages;       /* starting address of the array of flags */
+char              * missingPages=NULL;  /* starting address of the array of flags */
 int                 fout;               /* file discriptor for output file */
 
 int toRmFirst = FALSE;  /* remove existing file first and then sync */
@@ -290,6 +292,7 @@ int open_file()
   }
   
   /* init missingPages flags */
+  if (!missingPages) free(missingPages);
   missingPages =  malloc(sizeof(char) * nPages);  
   for(i=0; i < nPages; ++i) missingPages[i] = MISSING;
 
@@ -299,6 +302,10 @@ int open_file()
 
 int close_file()
 { 
+  /* delete missingPages flags which was malloc-ed in open_file() */
+  free(missingPages);
+  missingPages = NULL;
+
   if (S_ISREG(stat_mode) && stat_nlink == 1) {
     /* if it is a regular file and not a hardlink */
     char tmpFile[PATH_MAX];
@@ -340,14 +347,23 @@ int close_file()
       perror("ERROR: close_file():rename() \n");
       return FAIL;
     }
+
+    /* 20071016 in rare occasion, the written file has not the right size */
+    if (lstat(fullpath, &stat)<0) {
+      fprintf(stderr, "ERROR: close_file() cannot lstat %s\n", fullpath);
+      return FAIL;
+    }
+    if (stat_size != stat.st_size) {
+      fprintf(stderr, "ERROR: close_file() filesize != incoming-size\n");
+      return FAIL;
+    }    
   }
 
   /* for debug
   if (verbose>=2) fprintf(stderr, "total bytes written %llu for file %s\n", 
 			  total_bytes_written, filename);
   */
-  /* delete missingPages flags which was malloc-ed in open_file() */
-  free(missingPages);
+
   return SUCCESS;
 }
 
@@ -467,66 +483,113 @@ int touch_file()
   */
 }
 
-int delete_file()
+int delete_file(int to_check_dir_type)
 {
   struct stat st;
+  char fp[PATH_MAX];
+  int trailing_slash;
+  int type_checking;
 
-  if(lstat(fullpath, &st) < 0) {
+  strcpy(fp, fullpath);
+
+  /* remove trailing slash if any -- for deletion-'type' checking */
+  if (to_check_dir_type) {
+    char *pc;
+    type_checking = TRUE;    
+    pc = &fp[0] + strlen(fp) - 1;
+    if (*pc=='/') {
+      *pc = '\0';
+      trailing_slash = TRUE;
+    } else {
+      trailing_slash = FALSE;
+    };
+  } else {
+    type_checking = FALSE;
+  }
+
+  if(lstat(fp, &st) < 0) {
     /* already gone ? */
     return SUCCESS;
   }
   if (S_ISREG(st.st_mode)  || S_ISLNK(st.st_mode)) { /* delete a file or link */
     if (verbose>=2)
-      fprintf(stderr, "deleting file: %s\n", fullpath);
-    if (backup && S_ISREG(st.st_mode) && !make_backup(fullpath)) {/* backup regular file */
+      fprintf(stderr, "deleting file: %s\n", fp);
+    
+    if (type_checking && trailing_slash) { /* intended to remove a directory when it is not */
+      return FAIL;
+    }
+
+    if (backup && S_ISREG(st.st_mode) && !make_backup(fp)) {/* backup regular file */
       return FAIL; /* failed to make_backup */
     } 
-    return (my_unlink(fullpath));
+    return (my_unlink(fp));
   } else  if (S_ISDIR(st.st_mode)) { /* remove a directory */
     char cmd[PATH_MAX];
     if (verbose>=2)
-      fprintf(stderr, "deleting directory: %s\n", fullpath);
-    sprintf(cmd, "rm -rf %s", fullpath); /* remove everything in dir, watch out for this */
+      fprintf(stderr, "deleting directory: %s\n", fp);
+
+    if (type_checking && (!trailing_slash)) { /* intended to remove a non-dir when it is directory */
+      return FAIL;
+    }
+
+    sprintf(cmd, "rm -rf %s", fp); /* remove everything in dir, watch out for this */
     return (system(cmd)==0);
   }
   /* not file, link, directory */
-  fprintf(stderr, "unrecognized file_mode for %s\n", fullpath);
+  fprintf(stderr, "unrecognized file_mode for %s\n", fp);
   return FAIL;
 }
 
 /* send complaints to the master for missing data */
 int ask_for_missing_page()
 {
-  int i, n;
-
-  n = get_missing_pages();
-
-  /* No missing pages! Do nothing and return.. */
-  if (n == 0) {
-    return 0; /* nothing is missing */
-  }
+  int i, n=0, total=0;
 
   /* 
-     There are some missing pages.
-     We send one MISSING_PAGE complaint for each page successfully.
-     Unlike the sending pages in multicaster, whose time_delay
-     between pages is performed by read_handle_complaint() 
-     [or more precisely, readable()],
-     here we use usleep() directly to render the time delay
-     between two successive UDP.
+     Send missing page indexes if any
   */ 
+  init_fill_ptr();
   for(i=0; i < nPages; ++i) {
     if (missingPages[i] == MISSING ) {
-      /* send one missing page complaint for this page */
-      send_complaint(MISSING_PAGE, machineID, i+1, current_file_id);
-      /* to prevent sending multiple complaints too fast */
-      usleep(DT_PERPAGE);  
+      ++n;
+      ++total;
+      if (n > MAX_NPAGE) {
+	/* send previous missing page-indexes */
+	send_complaint(MISSING_PAGE, machineID, MAX_NPAGE, current_file_id);
+	init_fill_ptr();
+	n = 1; 
+      }
+      /* fill in one page index */
+      fill_in_int(i+1); /* origin = 1 */
     }
   }
-  /* 20060425 move the ack part to page_reader.c too keep the logic clearer */
-  /* send_complaint(MISSING_TOTAL, machineID, n); */
-    
-  return n;  /* there is something missing */
+  /* send the rest of missing pages complaint */
+  if (n>0) send_complaint(MISSING_PAGE, machineID, n, current_file_id);
+
+  return total;  /* there are missing pages */
+}
+
+void missing_page_stat()
+{
+  int i, n=0, sum=0, last=-1;
+
+  for(i=0; i < nPages; ++i) {
+    if (missingPages[i] == MISSING ) {
+      ++n;
+      if (last<0) {
+	sum += i;
+      } else {
+	sum += (i - last);
+      }
+      last = i;
+    }
+  }
+  if (n>0) {
+    double a = sum;
+    double b = n;
+    fprintf(stderr, "file= %d miss= %d out-of %d avg(delta_index) = %f\n", 
+	    current_file_id, n, nPages, a/b);
+  }
 }
 
 void my_perror(char * msg)
@@ -569,6 +632,76 @@ int set_owner_perm_times()
 
 int update_directory()
 {
+  struct stat st;
+  int exists;
+  char fp[PATH_MAX], *pc;
+
+  if (verbose>=2)
+    fprintf(stderr, "Updating dir: %s\n", fullpath);
+
+  /* if fullpath is a softlink that points to a dir,
+     and it has a trailing '/',
+     lstat() will view it as a directory ! 
+     So, we remove the trailing '/' before lstat() */
+  strcpy(fp, fullpath);
+  pc = &fp[0] + strlen(fp) - 1;
+  if (*pc=='/') *pc = '\0';
+
+  if(lstat(fp, &st) < 0) {
+    switch(errno) {
+    case ENOENT:
+      exists = FALSE;
+      break;
+    default:
+      my_perror("lstat");
+      return FAIL;
+    }
+  } else {
+    exists = TRUE;
+  }
+
+  if (!exists) {
+    /* There's nothing there, so create dir */
+    if (mkdir(fp, stat_mode) < 0){
+      my_perror("mkdir");
+      return FAIL;
+    }
+    return SUCCESS;
+  } else if (!S_ISDIR(st.st_mode)) {
+    /* If not a directory delete what is there */
+    if (unlink(fp)!=0){
+      my_perror("unlink");
+      return FAIL;
+    }
+    if (verbose>=2)
+      fprintf(stderr, "Deleted file %s to replace with directory\n", fp);
+    if (mkdir(fp, stat_mode) < 0){
+      my_perror("mkdir");
+      return FAIL;
+    }
+    return SUCCESS;
+  } else {
+    /* If dir exists,  just chmod */
+    chmod(fp, stat_mode);
+    /*** 20070410: changing mtime of a dir can cause NFS to confuse
+	 See http://lists.samba.org/archive/rsync/2004-May/009439.html
+	 So, I comment it out in the following 
+
+	 struct utimbuf times;
+	 times.actime = stat_atime;
+	 times.modtime = stat_mtime;
+    ***/
+    /*
+      if (utime(fullpath, &times) < 0) {
+      my_perror("utime");
+      }
+    */
+    return SUCCESS;
+  }
+}
+
+int update_directory0()
+{
   DIR *d;
 
   struct utimbuf times;
@@ -605,9 +738,14 @@ int update_directory()
     /* If dir exists,  just chmod */
     closedir(d);
     chmod(fullpath, stat_mode);
+    /*** 20070410: changing mtime of a dir can cause NFS to confuse
+	 See http://lists.samba.org/archive/rsync/2004-May/009439.html
+	 So, I comment it out in the following ***/
+    /*
     if (utime(fullpath, &times) < 0) {
       my_perror("utime");
     }
+    */
     return SUCCESS;
   }
 }
@@ -621,11 +759,15 @@ int check_zero_page_entry()
   */
   if (had_done_zero_page) return SUCCESS;  /* to avoid doing it again */
 
-  /* Is it a link? */
-  if (S_ISLNK(stat_mode)) {
+  if (S_ISDIR(stat_mode)) { /* a directory */
+    if (!update_directory()) {
+      had_done_zero_page = FAIL;
+      return FAIL;
+    }
+  } else if (S_ISLNK(stat_mode)) { /* Is it a softlink? */
     if (verbose>=2)
       fprintf(stderr, "Making softlink: %s -> %s\n", fullpath, linktar);
-    delete_file();  /* remove the old one at fullpath */
+    delete_file(FALSE);  /* remove the old one at fullpath */
     if (symlink(linktar, fullpath) < 0) {
       my_perror("symlink");
       had_done_zero_page = FAIL;
@@ -639,11 +781,6 @@ int check_zero_page_entry()
     my_unlink(fullpath);  /* remove the old one */
     if (link(fn, fullpath)!=0) {
       my_perror("link");
-      had_done_zero_page = FAIL;
-      return FAIL;
-    }
-  } else if (S_ISDIR(stat_mode)) {
-    if (!update_directory()) {
       had_done_zero_page = FAIL;
       return FAIL;
     }

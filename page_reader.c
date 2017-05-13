@@ -171,7 +171,7 @@ int read_handle_page()
     case SELECT_MONITOR_CMD:
       if (current_page_v == machineID) {
 	isMonitor = TRUE;
-	send_complaint(MONITOR_OK, machineID, 0);
+	send_complaint(MONITOR_OK, machineID, 0, 0);
       } else {
 	isMonitor = FALSE;
       }      
@@ -181,7 +181,7 @@ int read_handle_page()
       if ((current_page_v == (int) ALL_MACHINES || current_page_v == (int) machineID)
 	  && machineState == IDLE_STATE) {
 	/* get info about this file */
-	if (verbose>=2)
+	if (verbose>=1)
 	  fprintf(stderr, "open file id= %d\n", current_file_v);
 	if (!extract_file_info(data_ptr, current_file_v, total_pages_v))
 	  return mode_v;
@@ -203,7 +203,7 @@ int read_handle_page()
 	  last_missing_pages = nPages_for_file(current_file_v);
 	  machineState = GET_DATA_STATE;
 	}
-	send_complaint(OPEN_OK, machineID, 0); /* ack */
+	send_complaint(OPEN_OK, machineID, 0, current_file_id); /* ack */
 	nPage_recv = 0;
 	return mode_v;
       }
@@ -216,13 +216,13 @@ int read_handle_page()
       */
       if ((current_page_v == (int) ALL_MACHINES ||current_page_v == (int) machineID)
 	  && (machineState == GET_DATA_STATE)) { /****/
-	send_complaint(OPEN_OK, machineID, 0); 
+	send_complaint(OPEN_OK, machineID, 0, current_file_id); 
       }
       return mode_v;
 
     case EOF_CMD:
       /**********/
-      if (verbose>=2)	
+      if (verbose>=1)
 	fprintf(stderr, "***** EOF received for id=%d state=%d id=%d, file=%d\n", 
 		current_page_v, machineState, machineID, current_file_v);
 
@@ -237,7 +237,7 @@ int read_handle_page()
 
       /* normal condition */
       if ((current_page_v == (int) ALL_MACHINES || current_page_v == (int) machineID)
-	  && machineState == GET_DATA_STATE) {
+	  && machineState == GET_DATA_STATE) { /* GET_DATA_STATE */
 	/* check missing pages and send back missing-page-request */
 	current_missing_pages = ask_for_missing_page();
 
@@ -246,23 +246,22 @@ int read_handle_page()
 	  if (current_missing_pages == 0) { 
 	    /* w/o assuming how we get to this point ... */
 	    machineState = DATA_READY_STATE;
-	    send_complaint(EOF_OK, machineID, 0);
+	    send_complaint(EOF_OK, machineID, 0, current_file_id);
 	  } else {	  
-	    send_complaint(MISSING_TOTAL, machineID, current_missing_pages);
+	    send_complaint(MISSING_TOTAL, machineID, 
+			   current_missing_pages , current_file_id);
 	  }
 	  return mode_v;
 	}
 
 	/***
-	   Else this eof_cmd is for all_machines (after master sent or re-sent pages) 
-	   So, we do some book-keeping procedures (incl state change)
+	   master is asking everyone, (after master sent or re-sent pages) 
+	   so, we do some book-keeping procedures (incl state change)
 	***/
-	/*
-	fprintf(stderr, "missing_pages = %d, nPages_received = %d\n",
-		current_missing_pages, nPage_recv); ************/	
 	if (verbose >=1)
-	  printf("missing_pages = %d, nPages_received = %d\n",
-		 current_missing_pages, nPage_recv); 
+	  fprintf(stderr, "missing_pages = %d, nPages_received = %d file = %d\n",
+		  current_missing_pages, nPage_recv, current_file_v); /************/	
+	
 	nPage_recv = 0;
 
 	if (current_missing_pages == 0) {
@@ -271,7 +270,7 @@ int read_handle_page()
 	     Change the state.
 	  */
 	  machineState = DATA_READY_STATE;
-	  send_complaint(EOF_OK, machineID, 0);
+	  send_complaint(EOF_OK, machineID, 0, current_file_id);
 	  return mode_v;
 	} else {
 	  /* 
@@ -285,61 +284,90 @@ int read_handle_page()
 	    ++sick_count;
 	    if (sick_count > SICK_THRESHOLD) {
 	      machineState = SICK_STATE;
-	      send_complaint(EOF_OK, machineID, 0); /* no more attempt to receive */
+	      send_complaint(SIT_OUT, machineID, 
+			     0, current_file_id); /* no more attempt to receive */
 	      /* master may send more pages from requests from other machines
 		 but this machine will mark this file as 'sits out receiving' */
 	    } else {
 	      /* not sick enough yet */
-	      send_complaint(MISSING_TOTAL, machineID, current_missing_pages);
+	      send_complaint(MISSING_TOTAL, machineID, 
+			     current_missing_pages, current_file_id);
 	      /* master will send more pages */
 	    }
 	  } else { /* we are getting enough missing pages this time to keep up */
 	    sick_count = 0; /* break the consecutiveness */
-	    send_complaint(MISSING_TOTAL, machineID, current_missing_pages);
+	    send_complaint(MISSING_TOTAL, machineID, 
+			   current_missing_pages, current_file_id);
 	    /* master will send more pages */
 	  }
 	  last_missing_pages = current_missing_pages;	  
 	  return mode_v;
 	} 
-      }
+      } /* end GET_DATA_STATE */
+
       /* After state change, we still get request for ack.
 	 send back ack again */
-      if ((current_page_v == (int) ALL_MACHINES || current_page_v == (int) machineID) &&
-	  (machineState == DATA_READY_STATE || machineState == SICK_STATE)) {
-	send_complaint(EOF_OK, machineID, 0);	/* just an ack, even for sick state*/
-      }
+      if ((current_page_v == (int) ALL_MACHINES || current_page_v == (int) machineID)) {
+	switch (machineState) {
+	case DATA_READY_STATE:
+	  send_complaint(EOF_OK, machineID, 
+			 0, current_file_id);
+	  return mode_v;
+	case SICK_STATE:
+	  send_complaint(SIT_OUT, machineID, 
+			 0, current_file_id);	/* just an ack, even for sick state*/
+	  return mode_v;
+	}
+      }    
       return mode_v;
 
     case CLOSE_FILE_CMD:
-      if (verbose>=2)
+      if (verbose>=1)
 	fprintf(stderr, "***** CLOSE received for id=%d state=%d id=%d, file=%d\n", 
 		current_page_v, machineState, machineID, current_file_v);
 
       if ((current_file_v) != current_file_id) return mode_v;  /* ignore the cmd */
 
-      if ((current_page_v == (int) ALL_MACHINES || current_page_v == (int) machineID)
-	  && (machineState == DATA_READY_STATE || machineState == SICK_STATE)) {	
+      if (current_page_v == (int) ALL_MACHINES || current_page_v == (int) machineID) {
 	if (machineState == DATA_READY_STATE) {
 	  if (!close_file()) { return mode_v; };
 	  set_owner_perm_times();
 	  machineState = IDLE_STATE;
-	  send_complaint(CLOSE_OK, machineID, 0);
+	  send_complaint(CLOSE_OK, machineID, 0, current_file_id);
 	  return mode_v;
-	} else { /* SICK_STATE */
-	  close_tmp_file();
+	} else if (machineState == IDLE_STATE) {
+	  /* send ack back again because we are asked */	  
+	  send_complaint(CLOSE_OK, machineID, 0, current_file_id);	  
+	  return mode_v;
+	} else { /* other states -- we should not be here*/
+	  /* if (machineState == SICK_STATE || machineState == GET_DATA_STATE) */
+	  /* SICK_STATE --> we are too slow in getting missing pages
+                 if one of the machines is sick, master will send out CLOSE_ABORT
+	     GET_DATA_STATE -->
+	        We are not supposed to be in GET_DATA_STATE, 
+	        so consider it a sick_state */
+	  fprintf(stderr, "*** should not be here -- state=%d\n", machineState);
+	  if (!rm_tmp_file()) { return mode_v; };
 	  machineState = IDLE_STATE;
-	  send_complaint(SIT_OUT, machineID, 0);	 
+	  send_complaint(SIT_OUT, machineID, 0, current_file_id);	 
+	  /* make sick_count larger than threshold for GET_DATA_STATE */
+	  sick_count = SICK_THRESHOLD + 10000;
 	  return mode_v;
 	}
-      } 
-      /* send ack back again if asked */
-      if ((current_page_v == (int) ALL_MACHINES ||current_page_v == (int) machineID)
-	  && (machineState == IDLE_STATE)) { /****/
-	if (sick_count >  SICK_THRESHOLD) { /* we were in SICK_STATE */
-	  send_complaint(SIT_OUT, machineID, 0);
-	} else {
-	  send_complaint(CLOSE_OK, machineID, 0);
-	}
+      }
+      return mode_v;
+
+    case CLOSE_ABORT_CMD:
+      if (verbose>=1)
+	fprintf(stderr, "***** CLOSE_ABORT received for id=%d state=%d id=%d, file=%d\n", 
+		current_page_v, machineState, machineID, current_file_v);
+
+      if ((current_file_v) != current_file_id) return mode_v;  /* ignore the cmd */
+
+      if (current_page_v == (int) ALL_MACHINES || current_page_v == (int) machineID) {	
+	if (!rm_tmp_file()) { return mode_v; };
+	machineState = IDLE_STATE;
+	send_complaint(CLOSE_OK, machineID, 0, current_file_id);
       }
       return mode_v;
 
@@ -360,7 +388,7 @@ int read_handle_page()
       /* start_timer(); */
 
       write_page(current_page_v, data_ptr, bytes_read - HEAD_SIZE);
-      if (isMonitor) send_complaint(PAGE_RECV, machineID, 0);
+      if (isMonitor) send_complaint(PAGE_RECV, machineID, 0, current_file_id);
 
       /*
       end_timer();
@@ -371,15 +399,15 @@ int read_handle_page()
       ++nPage_recv; 
       return mode_v;
 
-    case ALL_DONE_CMD:     /* this is presumably a good machine */
+    case ALL_DONE_CMD:
       /* 
 	 clear up the files.
       */
-      if (machineState == GET_DATA_STATE) close_tmp_file(current_file_v);
-      if (machineState == DATA_READY_STATE) {
-	close_file();
-	set_owner_perm_times();
-      }
+      /*** since we do not know if there are other machines
+           that are NOT in data_ready_state,
+           to maintain equality, it is best to just
+           remove tmp_file without close_file() ***/      
+      rm_tmp_file();
       return mode_v;
 
     default:

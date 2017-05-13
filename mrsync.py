@@ -114,7 +114,7 @@ if not len(opts) == 0:
         elif o=='-x':
             without_monitor = True;
 
-if verbose>=1: print 'mrsync version 3.1.1';
+if verbose>=1: print 'mrsync version 3.1.2';
 
 if not machineListFile or not sourcePath:
     print >>sys.stderr, 'Essential options (-m -s) should be specified.';
@@ -276,6 +276,7 @@ def gen_caster_cmd():
 cmd = gen_caster_cmd();
 if verbose>=1: print cmd;
 ex_code = os.system(cmd);
+print >>sys.stderr, 'ex_code= ', ex_code;
 
 # -------------- to exit
 printTimeMsg('ALL DONE.');

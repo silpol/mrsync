@@ -65,11 +65,17 @@ void   my_exit(int);
 
 /* complaints.c */
 void   init_complaints();
-int    read_handle_complaint();
+int    read_handle_complaint(int cmd);
 void   wait_for_ok(int code);
 void   refresh_machine_status();
+void   refresh_missing_pages();
+void   mod_machine_status();
+void   refresh_file_received();
+int    nNotRecv();
+int    iNotRecv();
 int    is_it_missing(int page);
 int    has_missing_pages();
+int    has_sick_machines();
 void   init_missing_page_flag(int n);
 void   free_missing_page_flag();
 void   refresh_machine_status();
@@ -82,9 +88,13 @@ int    send_done_and_pr_msgs(double);
 void   do_cntl_c(int signo);
 void   set_has_missing();
 void   reset_has_missing();
+void   set_has_sick();
+void   reset_has_sick();
+
 
 /* setup_socket.c */
 void   set_delay(int secs, int usecs);
+void   get_delay(int * secs, int * usecs);
 int    readable(int fd);
 #ifndef IPV6
 int complaint_socket(struct sockaddr_in *addr, int port);
@@ -107,7 +117,7 @@ int Mcast_join(int sockfd, const char *mcast_addr,
 void sock_set_addr(struct sockaddr *sa, socklen_t salen, const void *addr);
 
 /* complaint_sender.c */
-void   send_complaint(int complaint, int mid, int page); 
+void   send_complaint(int complaint, int mid, int page, int file); 
 void   init_complaint_sender();
 #ifndef IPV6
 void update_complaint_address(struct sockaddr_in *sa);
@@ -121,17 +131,17 @@ int    check_queue();
 int    read_handle_page();
 
 /* file_operations.c */
+void   get_tmp_suffix();
 int    extract_file_info(char * buf, int n_file, unsigned int n_pages);
 int    open_file();
 int    close_file();
-void   close_tmp_file();
+int    rm_tmp_file();
 int    delete_file();
 int    touch_file();
 int    nPages_for_file();
 int    has_all_pages();
 int    ask_for_missing_page();
 void   write_page(int page, char* data_ptr, int bytes);
-int    missing_pages();
 int    is_missing(int page);
 void   page_received(int page);
 int    set_owner_perm_times();
@@ -149,6 +159,7 @@ double get_accumulated_usec();
 void   update_rtt_hist(unsigned int rtt);
 void   pr_rtt_hist();
 void   init_rtt_hist();
+unsigned int pages_wo_ack();
 
 /* signal.c */
 typedef	void	Sigfunc(int);	/* for signal handlers */

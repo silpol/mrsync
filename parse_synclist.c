@@ -42,6 +42,9 @@ unsigned int nEntries;
 int cur_entry;            /* file id -- <0 if it needs backup */
 unsigned int nPages;
 unsigned int last_bytes;  /* number of bytes for the last page */
+int toRmFirst = FALSE;    /* flag rm existing file and then sync */
+int file_changed = FALSE; /* flag to indicate if file has been changed during syncing */
+
 unsigned int total_pages;
 off_t total_bytes;
 
@@ -144,7 +147,7 @@ int same_stat_for_file()
   }
   
   if (st1.st_size != st.st_size || st1.st_mode != st.st_mode || 
-      st1.st_mtime != st.st_mtime || st1.st_atime != st.st_atime) {
+      st1.st_mtime != st.st_mtime) {
     return FAIL; /* the file has changed */
   }
   return SUCCESS;
@@ -217,14 +220,14 @@ int get_next_entry(int current_file_id)
   }
 
   nPages = pages_for_file();
-  /* fprintf(stderr, "npages = %d %s\n", nPages, fullname); ***********/
-  if (nPages > 0) {
+  if (nPages > 0) { /* for regular files */
     total_pages += nPages;
-    total_bytes += st.st_size;
+    total_bytes += st.st_size;    
   }
 
-  /* before exit this function, update cur_entry if backup is needed */
   if (needBackup(fullname)) cur_entry = -cur_entry;
+
+  file_changed = FALSE;
 
   return SUCCESS;
 }
@@ -260,14 +263,16 @@ unsigned int fill_in_stat(char *buf)
 {
   /* load into buf area the stat info in ascii format */
   if (isDelete) 
-    sprintf(buf, "0 0 0 0 0 0 0");
+    sprintf(buf, "0 0 0 0 0 0 0 0");
   else {
     #ifdef _LARGEFILE_SOURCE
-    sprintf(buf, "%u %u %u %u %llu %lu %lu", st.st_mode, st.st_nlink,
-	    st.st_uid, st.st_gid, st.st_size, st.st_atime, st.st_mtime);
+    sprintf(buf, "%u %u %u %u %llu %lu %lu %d", st.st_mode, st.st_nlink,
+	    st.st_uid, st.st_gid, st.st_size, st.st_atime, st.st_mtime,
+	    toRmFirst);
     #else
-    sprintf(buf, "%u %u %u %u %lu %lu %lu", st.st_mode, st.st_nlink,
-	    st.st_uid, st.st_gid, st.st_size, st.st_atime, st.st_mtime);
+    sprintf(buf, "%u %u %u %u %lu %lu %lu %d", st.st_mode, st.st_nlink,
+	    st.st_uid, st.st_gid, st.st_size, st.st_atime, st.st_mtime,
+	    toRmFirst);
     #endif
   }
   

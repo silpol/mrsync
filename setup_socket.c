@@ -198,6 +198,12 @@ void set_delay(int secs, int usecs)
   delay_usec = usecs;
 }
 
+void get_delay(int * secs, int * usecs)
+{
+  *secs = delay_sec;
+  *usecs= delay_usec;
+}
+
 /* 
    Check if there is an incoming UDP for a certain amount
    of time period specified in delay_tv..

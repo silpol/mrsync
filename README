@@ -65,6 +65,11 @@ version 4.0.0
       -- clean up scheme in choosing a monitor machine.
       -- misc code cleaning up and minor adjustments.
 
+version 4.0.1
+      -- Dave Close at ThalesGroup in CA points out
+         the type of c in "c = getopt()" should have been "int c"
+         [ It had been "char c". ]
+
 The mrsync package includes the following files:
 --------------------
 README           -- this file (usage example in the end.)

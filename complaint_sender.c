@@ -39,9 +39,12 @@ struct sockaddr_in6 complaint_addr;
 extern int         my_FLOW_PORT;
 extern int         verbose;
 
+int seq = 0;
+
 /* send buffer */
 char               complaint_buffer[FLOW_BUFFSIZE];  /* (ccode, cfile, cpage) */
 /* 
+   cmid_ptr = machine id number
    if ccode is related to missing page
       *cfile_ptr = which file -- for the missing page
       *cpage_ptr = which page -- for the missing page
@@ -50,7 +53,8 @@ char               complaint_buffer[FLOW_BUFFSIZE];  /* (ccode, cfile, cpage) */
       *cpage_ptr = 0
 */
 int                *ccode_ptr;  /* complain code ---- see main.h */
-int                *cmid_ptr;   /* which machine -- for missing page */
+int                *cmid_ptr;   /* which machine*/
+int                *cfile_ptr;  /* which file -- for missing page */
 int                *cpage_ptr;  /* which page -- for missing page */
 
 /*----------------------------------------------------------
@@ -72,7 +76,10 @@ void init_complaint_sender()    /* (struct sockaddr_in *ret_addr) */
   /* set up the pointers so we know where to put complaint_data */
   ccode_ptr = (int *) complaint_buffer;
   cmid_ptr  = (int *)(ccode_ptr + 1);
-  cpage_ptr = (int *)(cmid_ptr + 1);
+  cfile_ptr = (int *)(cmid_ptr + 1);
+  cpage_ptr = (int *)(cfile_ptr + 1);
+
+  seq = 0;
 }
 
 #ifndef IPV6
@@ -96,21 +103,24 @@ void update_complaint_address(struct sockaddr_in6 *sa)
   The major use is to tell master machine which page of which file
   needs to be re-transmitted.
   complaint -- the complain code defined in main.h
+  mid       -- machine id
   file      -- the file index
   page      -- page index
 
   It is also used for sending back acknoledgement.
   complaint -- the ack code defined in main.h in the same complaint section.
-  file      -- the machine ID number
+  mid       -- machine id
+  file      -- which file
   page      -- no use. Set it to 0
   ------------------------------------------------------------------------*/	
-void send_complaint(int complaint, int mid, int page)
+void send_complaint(int complaint, int mid, int page, int file)
 {
   /* fill in the complaint data */
   /* 20060323 add converting to network byte-order before sending out */
   *ccode_ptr = htonl(complaint);
   *cmid_ptr  = htonl(mid);
-  *cpage_ptr = htonl(page);
+  *cfile_ptr = htonl(file);
+  *cpage_ptr = htonl((complaint==MISSING_PAGE) ? page : seq++);
 
   /* send it */
   if(sendto(complaint_fd, complaint_buffer, FLOW_BUFFSIZE, 0,
@@ -119,5 +129,6 @@ void send_complaint(int complaint, int mid, int page)
     perror("Sending complaint\n");
   }
   if (verbose>=2)
-    printf("Sent complaint:code=%d mid=%d page=%d\n", complaint, mid, page);
+    printf("Sent complaint:code=%d mid=%d page=%d file=%d\n", 
+	   complaint, mid, page, file);
 }

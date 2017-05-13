@@ -17,6 +17,10 @@
 	        version 3.1.0
 		  -- codes for IPv6 are ready (but not tested)
 		     IPv4 is tested ok.
+		version 3.2.0
+                  -- monitor change improvement
+                  -- handshake improvement (e.g. seq #)
+		  -- if one machine skips a file, all will NOT close()
 
    Copyright (C)  2005 Renaissance Technologies Corp.
    Copyright (C)  2001 Renaissance Technologies Corp.
@@ -116,7 +120,11 @@ int main(int argc, char *argv[])
     usage();
     exit(BAD_EXIT);
   }
+  
+  fprintf(stderr, "my_pid= %lu\n", getpid());
+
   if (!backup_suffix) default_suffix();
+  get_tmp_suffix();  /* get a unique tmp_name for the tmp file */
 
   init_page_reader();
   init_complaint_sender();

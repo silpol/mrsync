@@ -58,6 +58,7 @@ char              * baseDir = NULL;
 char              * missingPages;       /* starting address of the array of flags */
 int                 fout;               /* file discriptor for output file */
 
+int toRmFirst = FALSE;  /* remove existing file first and then sync */
 /* off_t total_bytes_written;*/
 unsigned int nPages;
 int had_done_zero_page;
@@ -78,6 +79,7 @@ time_t  stat_mtime;
 char filename[PATH_MAX];
 char linktar[PATH_MAX];
 char fullpath[PATH_MAX];
+char tmp_suffix[L_tmpnam];
 
 void default_suffix()  
 {
@@ -89,6 +91,14 @@ void default_suffix()
 	  tm.tm_mon+1, tm.tm_mday, tm.tm_hour, tm.tm_min);
   backup_suffix = my_backup_suffix;
   return;
+}
+
+void get_tmp_suffix()
+{
+  /* this is called once in each multicatcher */
+  char tmp[L_tmpnam];
+  tmpnam_r(&tmp[0]);
+  strcpy(tmp_suffix, basename(tmp));
 }
 
 int make_backup() 
@@ -129,16 +139,56 @@ void get_full_path(char * dest, char * sub_path)
 
 void get_tmp_file(char * tmp)
 {
-  char  *fncopy;
-  
-  /* ******* change to filename_tmp */
-  fncopy = strdup(filename);   /* dirname change the string content */
+  /*char  *fncopy;*/
+  /* ******* change to filename_mcast.fileabc%$&? */
+  /* fncopy = strdup(filename);   dirname change the string content */
   strcpy(tmp, baseDir);
   strcat(tmp, "/");
-  strcat(tmp, dirname(fncopy));
-  strcat(tmp, "/");
+  strcat(tmp, filename);
+  strcat(tmp, "_");
   strcat(tmp, TMP_FILE);
-  free(fncopy);
+  strcat(tmp, tmp_suffix);
+  /* free(fncopy); */
+}
+
+int my_unlink(const char *fn)
+{ 
+  if (verbose>=2)
+    fprintf(stderr, "deleting file: %s\n", fn);
+  if (unlink(fn) != 0) {
+    if (errno==ENOENT) { 
+      return SUCCESS; 
+    } else { 
+      /* NOTE: unlink() could not remove files which do not have w permission!*/
+      /* resort to shell command */
+      char cmd[PATH_MAX];
+      sprintf(cmd, "rm -f %s", fn);
+      if (system(cmd)!=0) {    
+	fprintf(stderr, "'rm -f' fails for %s\n", fn);
+	return FAIL;
+      }
+    }
+  }
+  return SUCCESS;
+}
+
+int my_touch(const char*fn)
+{
+  int fo;
+  if( (fo = open(fn,  O_RDWR | O_CREAT | O_TRUNC, 
+		 S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH)) < 0) {
+    perror(fn);
+    return FAIL;
+  }
+
+  /* set the size of the output file */
+  if(lseek(fo, 0, SEEK_SET) == -1) {
+    fprintf(stderr, "cannot seek for %s\n", fn);
+    perror(fn);
+    return FAIL;
+  }  
+  close(fo);
+  return SUCCESS;
 }
 
 int extract_file_info(char * buf, int n_file, unsigned int n_pages)
@@ -153,12 +203,14 @@ int extract_file_info(char * buf, int n_file, unsigned int n_pages)
   char * pc = &buf[0];
 
   #ifdef _LARGEFILE_SOURCE
-  if (sscanf(pc, "%u %u %u %u %llu %lu %lu", &stat_mode, &stat_nlink,
-	     &stat_uid, &stat_gid, &stat_size, &stat_atime, &stat_mtime) != 7)
+  if (sscanf(pc, "%u %u %u %u %llu %lu %lu %d", &stat_mode, &stat_nlink,
+	     &stat_uid, &stat_gid, &stat_size, &stat_atime, &stat_mtime, 
+	     &toRmFirst) != 8)
     return FAIL;
   #else
-  if (sscanf(pc, "%u %u %u %u %lu %lu %lu", &stat_mode, &stat_nlink,
-	     &stat_uid, &stat_gid, &stat_size, &stat_atime, &stat_mtime) != 7)
+  if (sscanf(pc, "%u %u %u %u %lu %lu %lu %d", &stat_mode, &stat_nlink,
+	     &stat_uid, &stat_gid, &stat_size, &stat_atime, &stat_mtime,
+	     &toRmFirst) != 8)
     return FAIL;
   #endif
 
@@ -186,17 +238,31 @@ int open_file()
 {
   int i;
 
+  /* 
+     sometimes for disk space reason, it is necessary 
+     to first remove the file and sync.
+     If toReplace is true, the backup option should be off.
+  */
+  if (toRmFirst) {
+    if (!my_unlink(fullpath)) {
+      fprintf(stderr, "Replacing ");
+      perror(filename);
+      return FAIL;
+    }
+  }
+
   /* fprintf(stderr, "%d %d %d\n", stat_mode, stat_nlink, stat_size); *********/
   if (S_ISREG(stat_mode) && stat_nlink == 1) {
     /* if it is a regular file and not a hardlink */ 
     char tmpFile[PATH_MAX];
     get_tmp_file(tmpFile);
     
-    unlink(tmpFile);   /* make sure it's not there from previous runs */
+    my_unlink(tmpFile);   /* make sure it's not there from previous runs */
     
     if( (fout = open(tmpFile,  O_RDWR | O_CREAT | O_TRUNC, 
 		     S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH)) < 0) {
       fprintf(stderr, "cannot open() %s for writing. \n", tmpFile);
+      perror(tmpFile);
       return FAIL;
     }
 
@@ -207,7 +273,8 @@ int open_file()
       #else
       fprintf(stderr, "lseek() error for %s with size = %u\n", tmpFile, (unsigned int)stat_size);
       #endif
-      close(fout);
+      perror(tmpFile);
+      close(fout);     
       return FAIL;
     }
     if (write(fout, "", 1) != 1) {
@@ -216,7 +283,8 @@ int open_file()
       #else
       fprintf(stderr, "write() error for %s with size = %u\n", tmpFile, (unsigned int)stat_size);
       #endif
-      close(fout);
+      perror(tmpFile);
+      close(fout);      
       return FAIL;      
     }
   }
@@ -244,6 +312,7 @@ int close_file()
       fprintf(stderr, "ERROR: Cannot close() tmp for -- %s size= %u \n", 		
 	      filename, (unsigned int)stat_size);
       #endif
+      perror("close");
       return FAIL;
     }
     fout = -1;  /* if the following fails, the reentry wont do munmap() */
@@ -282,14 +351,26 @@ int close_file()
   return SUCCESS;
 }
 
-void close_tmp_file()
+int rm_tmp_file()
 { 
   char tmpFile[PATH_MAX];
+
+  if ((fout !=  -1) && (close(fout) != 0)) {
+      #ifdef _LARGEFILE_SOURCE
+      fprintf(stderr, "ERROR: Cannot close() tmp for -- %s size= %llu \n",
+	      filename, stat_size);
+      #else
+      fprintf(stderr, "ERROR: Cannot close() tmp for -- %s size= %u \n", 		
+	      filename, (unsigned int)stat_size);
+      #endif
+      perror("rm_tmp");
+      return FAIL;
+    }
+  fout = -1;
   
   get_tmp_file(tmpFile);
 
-  unlink(tmpFile);
-  return;
+  return (my_unlink(tmpFile));
 } 
 
 int nPages_for_file()
@@ -298,7 +379,7 @@ int nPages_for_file()
 };
 
 /* return total number of missing pages */
-int missing_pages()
+int get_missing_pages()
 {
   int i, result=0;
 
@@ -336,6 +417,8 @@ int writable(int fd)
 void write_page(int page, char *data_ptr, int bytes)
 {
   /* page = page number starting with 1 */
+  if (page < 1 || page > nPages) return;
+
   /* Do we need to write this page? */
   if (is_missing(page-1)){
     if (!writable(fout)) return;
@@ -371,14 +454,17 @@ void write_page(int page, char *data_ptr, int bytes)
 /* For files whose size is 0 */
 int touch_file()
 {
-  char cmd[PATH_MAX];
-
   if (verbose >=2) 
     fprintf(stderr, "touching file: %s\n", fullpath);
 
-  unlink(fullpath);
-  sprintf(cmd, "touch %s", fullpath);
-  return (system(cmd)==0);
+  my_unlink(fullpath);
+  return my_touch(fullpath);
+  /* system() 
+    VERY time in-efficient 
+    char cmd[PATH_MAX];
+    sprintf(cmd, "touch %s", fullpath);
+    return (system(cmd)==0);
+  */
 }
 
 int delete_file()
@@ -395,12 +481,12 @@ int delete_file()
     if (backup && S_ISREG(st.st_mode) && !make_backup(fullpath)) {/* backup regular file */
       return FAIL; /* failed to make_backup */
     } 
-    return (unlink(fullpath)==0);
+    return (my_unlink(fullpath));
   } else  if (S_ISDIR(st.st_mode)) { /* remove a directory */
     char cmd[PATH_MAX];
     if (verbose>=2)
       fprintf(stderr, "deleting directory: %s\n", fullpath);
-    sprintf(cmd, "rmdir %s", fullpath); /* we only remove empty directory (rmdir) */
+    sprintf(cmd, "rm -rf %s", fullpath); /* remove everything in dir, watch out for this */
     return (system(cmd)==0);
   }
   /* not file, link, directory */
@@ -413,14 +499,10 @@ int ask_for_missing_page()
 {
   int i, n;
 
-  n = missing_pages();
+  n = get_missing_pages();
 
   /* No missing pages! Do nothing and return.. */
   if (n == 0) {
-    /* 
-       send_complaint(EOF_OK, machineID, 0); 
-       is done in read_handle_page() in page_reader.c
-    */
     return 0; /* nothing is missing */
   }
 
@@ -436,7 +518,7 @@ int ask_for_missing_page()
   for(i=0; i < nPages; ++i) {
     if (missingPages[i] == MISSING ) {
       /* send one missing page complaint for this page */
-      send_complaint(MISSING_PAGE, machineID, i+1);
+      send_complaint(MISSING_PAGE, machineID, i+1, current_file_id);
       /* to prevent sending multiple complaints too fast */
       usleep(DT_PERPAGE);  
     }
@@ -447,12 +529,21 @@ int ask_for_missing_page()
   return n;  /* there is something missing */
 }
 
+void my_perror(char * msg)
+{
+  char fn[PATH_MAX];
+  sprintf(fn, "%s - %s", fullpath, msg);
+  perror(fn);
+}
+
 int set_owner_perm_times()
 {
+  int state = SUCCESS;
+
   /* set owner */
   if (lchown(fullpath, stat_uid, stat_gid)!=0) {
-    perror(fullpath);
-    return FAIL;    
+    my_perror("chown");
+    state = FAIL;
   }
 
   /* 
@@ -462,18 +553,18 @@ int set_owner_perm_times()
   if (!S_ISLNK(stat_mode)) {
     struct utimbuf times; 
     if (chmod(fullpath, stat_mode)!=0) {
-      perror(fullpath);
-      return FAIL;    
+      my_perror("chmod");
+      state = FAIL;    
     }
 
     times.actime = stat_atime;
     times.modtime = stat_mtime;
     if (utime(fullpath, &times)!=0) {
-      perror(fullpath);
-      return FAIL;
+      my_perror("utime");
+      state = FAIL;
     }
   }
-  return SUCCESS;
+  return state;
 }
 
 int update_directory()
@@ -493,7 +584,7 @@ int update_directory()
     case ENOTDIR:
       /* If not a directory delete what is there */
       if (unlink(fullpath)!=0){
-	perror(fullpath);
+	my_perror("unlink");
 	return FAIL;
       }
       if (verbose>=2)
@@ -502,12 +593,12 @@ int update_directory()
     case ENOENT:
       /* There's nothing there, so create dir */
       if (mkdir(fullpath, stat_mode) < 0){
-	perror(fullpath);
+	my_perror("mkdir");
 	return FAIL;
       }
       return SUCCESS;
     default:
-      perror(fullpath);
+      my_perror("opendir");
       return FAIL;
     } 
   } else {
@@ -515,7 +606,7 @@ int update_directory()
     closedir(d);
     chmod(fullpath, stat_mode);
     if (utime(fullpath, &times) < 0) {
-      perror(fullpath);
+      my_perror("utime");
     }
     return SUCCESS;
   }
@@ -528,7 +619,7 @@ int check_zero_page_entry()
        softlink (hardlink),
        a directory
   */
-  if (had_done_zero_page) return SUCCESS;  /* to avoid do it again */
+  if (had_done_zero_page) return SUCCESS;  /* to avoid doing it again */
 
   /* Is it a link? */
   if (S_ISLNK(stat_mode)) {
@@ -536,7 +627,7 @@ int check_zero_page_entry()
       fprintf(stderr, "Making softlink: %s -> %s\n", fullpath, linktar);
     delete_file();  /* remove the old one at fullpath */
     if (symlink(linktar, fullpath) < 0) {
-      perror(fullpath);
+      my_perror("symlink");
       had_done_zero_page = FAIL;
       return FAIL;
     }
@@ -545,9 +636,9 @@ int check_zero_page_entry()
     get_full_path(fn, linktar); /* linktar is a relative path from synclist */
     if (verbose>=2) 
       fprintf(stderr, "Making a hardlink: %s => %s\n", fullpath, fn);
-    unlink(fullpath);  /* remove the old one */
+    my_unlink(fullpath);  /* remove the old one */
     if (link(fn, fullpath)!=0) {
-      perror("fullpath");
+      my_perror("link");
       had_done_zero_page = FAIL;
       return FAIL;
     }
@@ -558,9 +649,12 @@ int check_zero_page_entry()
     }
   } else {
     /* it must be a regular file */
-    if (!touch_file() || !set_owner_perm_times()) {
+    
+    if (!touch_file()) {
       had_done_zero_page = FAIL;
       return FAIL;
+    } else {
+      set_owner_perm_times();
     }
   }
   had_done_zero_page = SUCCESS;
